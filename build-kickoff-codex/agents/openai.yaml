@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build Kickoff for Codex"
+  short_description: "Turn a big idea into a Codex build prompt"
+  default_prompt: "Use $build-kickoff-codex to interview me and write a Codex-native kickoff prompt for this project."

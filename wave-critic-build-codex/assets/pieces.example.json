@@ -1,0 +1,68 @@
+{
+  "$comment": [
+    "Codex piece manifest.",
+    "Ownership globs must be disjoint.",
+    "A piece must be judgeable from named review states.",
+    "The primary agent owns integration and durable state files."
+  ],
+  "project": {
+    "name": "EXAMPLE",
+    "repo": "/absolute/path/to/repo",
+    "branch": "codex/example-build",
+    "benchmark": "Linear's issue view (web)",
+    "passScore": 8.5,
+    "maxRoundsPerPiece": 2,
+    "plateauDelta": 0.5,
+    "contract": "CONTRACT.md",
+    "types": "src/types.ts",
+    "ledger": "tools/progress.state.json",
+    "waveState": "tools/wave.state.json",
+    "gates": [
+      "npm run typecheck",
+      "npm test",
+      "npm run smoke"
+    ],
+    "observe": [
+      "node tools/capture.mjs --list",
+      "node tools/capture.mjs --only <states> --out <dir>",
+      "node tools/trace.mjs --scenario <name>"
+    ],
+    "rules": [
+      "Codex subagents share this workspace.",
+      "Only edit your owned files.",
+      "Do not revert, stage, commit, or broadly reformat other agents' work.",
+      "Keep the harness deterministic.",
+      "Do not publish or deploy without explicit user authority."
+    ],
+    "state": "Describe the product's current state honestly in three or four sentences."
+  },
+  "pieces": [
+    {
+      "id": "list",
+      "name": "List view",
+      "owns": ["src/views/list/**"],
+      "reviewStates": ["list-empty", "list-dense", "list-loading", "list-error"],
+      "brief": "The list renders rows but lacks grouping, full keyboard navigation, an actionable empty state, and stable loading layout. Add those within ownership and keep 500-row interaction below the stated budget.",
+      "state": "queued",
+      "carry": null
+    },
+    {
+      "id": "detail",
+      "name": "Detail view",
+      "owns": ["src/views/detail/**"],
+      "reviewStates": ["detail", "detail-editing", "detail-mobile", "detail-error"],
+      "brief": "Describe what exists, what is absent, and the exact observable behavior required.",
+      "state": "queued",
+      "carry": null
+    },
+    {
+      "id": "performance",
+      "name": "Performance budget",
+      "owns": ["src/perf/**"],
+      "reviewStates": ["list-dense", "detail"],
+      "brief": "Measure before editing. Improve the named budget without changing stable snapshots. Report any cross-owner hot path instead of editing it.",
+      "state": "queued",
+      "carry": null
+    }
+  ]
+}

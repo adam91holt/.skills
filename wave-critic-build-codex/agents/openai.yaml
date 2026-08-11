@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wave Critic Build for Codex"
+  short_description: "Run benchmarked multi-agent build waves"
+  default_prompt: "Use $wave-critic-build-codex to run this project as Codex build-and-critic waves with explicit ownership and termination."
