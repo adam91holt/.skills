@@ -278,11 +278,14 @@ A persistent session woken on a schedule (hourly works well), running a
 `references/orchestrator-setup.md` to stand it up; read
 `assets/orchestrator.example.md` to see a populated one.
 
-**The scheduler must live outside the thing it schedules.** Wake the session
-with a server-side Routine (`create_trigger`), not an in-session cron or a
-re-armed reminder chain — those die with the container, in exactly the event
-they exist to detect. In the recorded run that mistake cost 67.5 hours of
-silence, caught by the human, not the loop.
+**How it wakes depends on where it runs.** On a local machine, `/loop` or an
+in-session cron is fine — the session lives as long as the machine does. In a
+remote environment the container suspends without warning, so the scheduler
+must live outside the thing it schedules: a server-side Routine
+(`create_trigger`), never an in-session cron or a re-armed reminder chain —
+those die with the container, in exactly the event they exist to detect. In the
+recorded run that mistake cost 67.5 hours of silence, caught by the human, not
+the loop.
 
 ```
 STEP 0 — publish the session archive

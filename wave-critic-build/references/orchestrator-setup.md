@@ -157,31 +157,42 @@ command that errors is read by an agent as "no evidence of death".
 
 ## Step C — Choose how it wakes
 
-> **The scheduler must live outside the thing it schedules.** Anything that runs
-> inside the session — an in-memory cron, a re-armed reminder chain, a `/loop` —
-> dies in exactly the event it exists to detect.
+**The choice is made by where the loop runs**, because the two environments die
+differently:
 
-This is the most expensive lesson in the recorded run, and it dwarfs every wave
-stall: the loop went silent for **67.5 hours**, bridged only by the human asking
-"is it definitely still running?". The chain: an hourly `send_later` re-arm
-worked seven times, then one re-arm call failed (the MCP tool's name had changed
-mid-session) and the chain was dead. The fallback was the harness cron — whose
-own tool result says *"Session-only (not written to disk, dies when Claude
-exits)"* — and the container suspended, taking the cron with it. So did the
-12-minute liveness cron: *"it's in-memory, so it can't survive the thing it
-exists to detect."* What fixed it, permanently, was a **server-side Routine**:
-*"Routines are server-side — they survive suspension and wake the session,
-unlike the in-memory cron. That's the actual fix."* It then fired hourly without
-a miss for the rest of the build.
+- **A local machine** (Claude Code CLI on hardware you own): the session
+  process stays alive as long as the machine does. `/loop 1h <pointer>` or an
+  in-session cron is fine here, and simpler — the in-session mechanisms only
+  die if you close the terminal or the machine sleeps. If the box may sleep or
+  you may close the lid, fall through to the remote rules.
+- **A remote / managed environment** (Claude Code on the web, CCR, Cowork
+  cloud): the container suspends without warning — every 35–90 minutes in the
+  recorded run — and takes every in-session mechanism with it. Here the rule
+  is absolute: **the scheduler must live outside the thing it schedules.**
+  Anything that runs inside the session — an in-memory cron, a re-armed
+  reminder chain, a `/loop` — dies in exactly the event it exists to detect.
+
+The remote case is the most expensive lesson in the recorded run, and it dwarfs
+every wave stall: the loop went silent for **67.5 hours**, bridged only by the
+human asking "is it definitely still running?". The chain: an hourly
+`send_later` re-arm worked seven times, then one re-arm call failed (the MCP
+tool's name had changed mid-session) and the chain was dead. The fallback was
+the harness cron — whose own tool result says *"Session-only (not written to
+disk, dies when Claude exits)"* — and the container suspended, taking the cron
+with it. So did the 12-minute liveness cron: *"it's in-memory, so it can't
+survive the thing it exists to detect."* What fixed it, permanently, was a
+**server-side Routine**: *"Routines are server-side — they survive suspension
+and wake the session, unlike the in-memory cron. That's the actual fix."* It
+then fired hourly without a miss for the rest of the build.
 
 Durability hierarchy, most durable first:
 
 | Mechanism | Session continuity | Survives suspend/restart | Verdict |
 |---|---|---|---|
-| **Server-side Routine** (`create_trigger`, claude-code-remote MCP) bound to the persistent session | Same session, full history | **Yes — fires server-side and revives the container** | **The default for anything unattended** |
+| **Server-side Routine** (`create_trigger`, claude-code-remote MCP) bound to the persistent session | Same session, full history | **Yes — fires server-side and revives the container** | **The default for anything unattended in a remote environment** |
 | Server-side Routine, fresh session per fire | None — each tick starts cold | Yes | Works; every tick pays the cold-start, and resume is unavailable (see below) |
 | `send_later` re-arm chain | Same session | The *pending* one survives — but every tick must successfully re-arm, and one failed call kills the loop silently | Acceptable short-term; know its failure mode |
-| In-session cron (`CronCreate`) or `/loop 1h <pointer>` | Same session | **No — in-memory, dies with the container** | Supervised, same-day work only |
+| In-session cron (`CronCreate`) or `/loop 1h <pointer>` | Same session | **No — in-memory, dies with the container** | **Local machines**, or supervised same-day remote work |
 | System cron → CLI headless | Fresh session each tick | Yes | You own the box and want it outside the app |
 
 Hourly is the right default (for Routines it is also the minimum interval). It
