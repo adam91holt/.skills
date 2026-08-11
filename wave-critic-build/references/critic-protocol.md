@@ -181,6 +181,20 @@ Close that gap first. Do not start a redesign.
 **"Do not start a redesign" is load-bearing.** Without it, round 3 opens with a
 rewrite of round 2, the measurement is lost, and the score does not move.
 
+### The ratchet
+
+A verdict's measurement has a second life after the gap closes: it becomes a
+**deterministic test** inside the builder's ownership, wired into the test gate.
+*"3 draws in 145 seconds"* is already an executable assertion — the harness's
+seeded RNG and frozen clock make it stable. Without the ratchet, any later
+round can silently reopen a gap the loop paid a full critic to find, and
+nothing notices until a critic happens to re-judge that piece; with it, the
+test suite grows exactly as the build matures. Two boundaries keep it honest:
+critics judge the product and **never** the tests (a green suite is a Medium
+gate, below smoke and far below looking), and the ratchet test lands **in the
+same commit** as the fix that closes the gap — a fix without its ratchet is not
+closed.
+
 **Never re-buy an earned verdict.** When a run dies, read its journal for results
 that already carry a `score` and pass those forward. A verdict costs a full critic
 agent; re-running one to rediscover what you already know is the most common way

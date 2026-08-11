@@ -100,7 +100,11 @@ Offer, recommended first:
 
 This decides the harness, which is the thing that makes any of it observable.
 Browser/Three.js, a web app, a CLI, a service, a pipeline. If they have no
-preference, pick the one with the best headless capture story and say so.
+preference, pick the one with the best headless capture story and say so — and
+**prefer a typed stack**: the ownership contract between agents is enforced by
+the typechecker (wave-critic-build's precondition 3), so an untyped stack
+removes the referee. The recorded run's user had to add "We should use
+typescript" eight minutes after kickoff; ask it here instead.
 
 ### A second round, only if needed
 

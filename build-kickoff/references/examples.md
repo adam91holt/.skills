@@ -82,7 +82,9 @@ should keep going.
 The critic writes down what Linear does from memory before it opens ours at all,
 then compares them side by side blind and says which is better. When ours loses,
 it names the single biggest gap — one, not a list — with a measurement I could
-check myself, and sends the builder back to close exactly that.
+check myself, and sends the builder back to close exactly that. Once a gap is
+closed, turn its measurement into an automated test that runs with every build,
+so it can never quietly come back.
 
 Don't stop until each critic is genuinely wowed against Linear. But if a piece's
 score moves less than half a point across two rounds, don't give it another round
@@ -144,6 +146,8 @@ The critic writes down what Stripe returns for the equivalent call from memory �
 status, body shape, error code, message register — before it opens ours at all,
 then compares blind and says which is better. When ours loses it names the single
 biggest gap, with the exact request that shows it, and sends the builder back.
+Every closed gap becomes an automated test — the exact request, asserted — so it
+can never quietly come back.
 
 Give each piece at most 4 rounds. If it hasn't passed, ship it at its score and
 record the critic's gap verbatim on the progress page. An honest board beats a
@@ -171,9 +175,10 @@ sub-agents and ultracode.
 Every structural clause. The benchmark, delegated decomposition, disjoint
 ownership, fresh-context critic, *never the builder's summary*, memory-first blind
 A/B, single gap with a measurement, a termination rule, the coherence pass, the
-ledger, the reporting rule, the triggers — and, for anything unattended, the
-scheduler paragraph (survives restarts, liveness by process age,
-resume-not-relaunch), which the original lacked and paid 67.5 silent hours for.
+ledger, the reporting rule, the triggers, the gap→test ratchet — and, for
+anything unattended, the scheduler paragraph (survives restarts, liveness by
+process age, resume-not-relaunch), which the original lacked and paid 67.5
+silent hours for.
 
 ## What changes
 

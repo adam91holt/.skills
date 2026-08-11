@@ -216,6 +216,15 @@ Close that gap first. Do not start a redesign.
 
 That last line matters: without it, round 3 opens with a rewrite of round 2.
 
+**When a gap closes, ratchet it.** The measurement in the verdict — *"item slot
+empty for 87% of a race"* — becomes a deterministic test inside the builder's
+ownership, wired into the test gate. A closed gap without a ratchet test can
+silently reopen in any later round, and only a critic happening to re-judge
+that piece would ever notice; with the test, the suite grows exactly as the
+build matures and every verdict the loop paid for stays paid for. Critics still
+judge the product, never the tests — the ratchet is the builder's guard-rail,
+not the judgment.
+
 **Never re-buy an earned verdict.** When a run dies, read its journal for results
 that already carry a score and carry those forward.
 
@@ -348,6 +357,7 @@ bug can drop two of three pieces while the wave cheerfully reports itself starte
 | Gate | Strength | What it actually proves |
 |---|---|---|
 | Typecheck / lint | Weak | The modules still agree about their interfaces |
+| Unit + ratchet tests | Medium | The pieces' logic invariants hold, and no gap a critic ever closed has reopened |
 | Smoke run | **Real** | It still boots and runs |
 | Look at the captured output | **Truth** | It is what you think it is |
 
@@ -475,7 +485,9 @@ eight agents write in eight voices and every coherence round is spent on tone.
    as types.
 4. Judge with a **fresh agent that never sees the builder**, that writes the
    benchmark down *before* it looks, and returns **one gap** with a **measurement**.
-5. **Carry the verdict forward.** Never re-buy it.
+5. **Carry the verdict forward.** Never re-buy it — and when a gap closes,
+   **ratchet it**: the verdict's measurement becomes a deterministic test in the
+   gates, so it can never silently reopen.
 6. Run a **whole-repo pass, alone, between waves**, and let it delete things.
 7. Keep waves short, prove liveness by process age, **resume rather than relaunch**.
 8. Trust the smoke test over the typecheck, and the captured output over both.

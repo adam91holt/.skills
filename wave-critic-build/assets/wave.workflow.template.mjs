@@ -197,7 +197,10 @@ Score ${last.score}/10. Blind A/B against ${P.benchmark}: ${last.blindPick}.
 Biggest gap: ${last.biggestGap}
 Directive: ${last.directive}
 Observed: ${evidenceLine(last.evidence)}
-Close that gap first. Do not start a redesign.
+Close that gap first. Do not start a redesign. When you close it, encode the
+critic's measurement as a deterministic test in files you own and wire it into
+the test gate, in the same commit as the fix — a closed gap without its ratchet
+test reopens silently in a later round.
 `
     : '';
 
