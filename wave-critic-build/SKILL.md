@@ -51,6 +51,11 @@ or weeks of unattended building.
 Not worth it for a single feature, a bug fix, or anything where a person is going
 to read every diff anyway. Use ordinary review for those.
 
+**If the user has not started yet** and wants the opening prompt written rather
+than the loop run, that is the `build-kickoff` skill — it interviews them (above
+all: which shipped product is the benchmark) and emits the kickoff prompt that
+starts everything below.
+
 ---
 
 ## Phase 0 — The five preconditions
