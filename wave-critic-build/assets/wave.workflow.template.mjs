@@ -10,14 +10,30 @@
  *     scriptPath: "<repo>/tools/wave.workflow.mjs",
  *     args: {
  *       manifest: "<repo>/tools/pieces.json",   // required
- *       pieces:   ["list", "detail"],           // which ids to run this wave
+ *       pieces:   ["list", "detail"],           // REQUIRED — ids for this wave, or the string "all"
  *       rounds:   2,
  *       carry:    { list: <a prior verdict> }   // verdicts earned in a dead run
  *     }
  *   })
  *
- * RESUME: pass the SAME args object byte-for-byte with resumeFromRunId. Finished
- * agents replay from cache; only the killed ones re-run.
+ * The harness asks for `args` as a real JSON value; this script also accepts
+ * the JSON-string shape defensively (every launch in the recorded run arrived
+ * stringified) and THROWS on anything else. The three-day carry-starvation bug
+ * was a script that read a stringified args without parsing it — `args.pieces`
+ * came back undefined and the script fell through to defaults, silently.
+ *
+ * RESUME: relaunch with resumeFromRunId and the EXACT args value the run was
+ * launched with, verbatim — record it at launch. The replay cache is keyed per
+ * agent() call on (prompt, opts); identical args into an unedited,
+ * manifest-driven script keep every completed call's prompt identical, which
+ * is what makes the cache hit. Finished agents replay from cache; only the
+ * killed ones re-run. Two constraints:
+ *   - Resume only works from the SESSION that launched the run. A replaced
+ *     session goes straight to journal-rescue + fresh launch with carry.
+ *   - The manifest is read by an agent() call, so a resume REPLAYS the cached
+ *     manifest. Edits to pieces.json between death and resume have no effect
+ *     until the next fresh wave — which also keeps every downstream prompt
+ *     byte-identical, so do not "fix" it.
  */
 
 export const meta = {
@@ -192,9 +208,13 @@ YOU OWN (and may only edit): ${piece.owns}
 ${piece.brief}
 ${feedback}
 
-If your module is new, you must also register it in the application entry point —
-that is the ONE file outside your ownership you may touch, and only to add your
-import and one registration line. Nothing else in it.
+If your module is new, register it by ADDING A NEW FILE under the registry
+directory named in the contract (e.g. src/registry/<your-piece-id>.ts) — the
+entry point loads everything in that directory and belongs to core. Never edit
+the shared entry point itself: other builders are landing modules in parallel,
+and two agents editing one file at once is the exact collision this contract
+exists to prevent. If the repo has no registry directory yet, say so in your
+report instead of touching files you do not own.
 
 Work until the piece is genuinely excellent, then verify with the gates above.
 Look at your own captured output before declaring done — capture the states
@@ -244,7 +264,21 @@ a user would notice, it fails.`;
 // ── run ────────────────────────────────────────────────────────────────────
 
 const byId = new Map(MANIFEST.pieces.map((p) => [p.id, p]));
-const ids = input.pieces?.length ? input.pieces : MANIFEST.pieces.map((p) => p.id);
+
+// `pieces` is REQUIRED. Running every piece is spelled `pieces: "all"`, on
+// purpose: the historical bug was exactly `args.pieces` arriving undefined and
+// a silent fall-through to defaults, which spent ninety minutes rebuilding
+// pieces that were already done. Absence must be loud, not interpreted.
+const ids =
+  input.pieces === 'all'
+    ? MANIFEST.pieces.map((p) => p.id)
+    : Array.isArray(input.pieces) && input.pieces.length
+      ? input.pieces
+      : (() => {
+          throw new Error(
+            'wave: args.pieces is required — a non-empty array of piece ids, or the explicit string "all".',
+          );
+        })();
 
 const missing = ids.filter((id) => !byId.has(id));
 if (missing.length) throw new Error(`wave: no such piece(s) in the manifest: ${missing.join(', ')}`);
@@ -254,12 +288,23 @@ const selected = ids.map((id) => byId.get(id));
 log(`Wave: ${ids.join(', ')} — up to ${MAX_ROUNDS} rounds each, pass at ${PASS_SCORE}.`);
 for (const id of Object.keys(CARRY)) log(`  carrying forward a prior verdict for ${id}`);
 
-// pipeline, not parallel: piece A may be in round 3 while piece B is in round 1.
-// A barrier between build and judge would waste the fast piece's wall clock.
+// One self-contained stage per piece: each piece runs its own build→judge
+// rounds independently, so piece A can be in round 3 while B is in round 1.
+// (With a single stage, pipeline() and parallel() behave the same here — both
+// run items concurrently, and both resolve a throwing item to null, which is
+// why `dropped` is computed loudly below.) Concurrency equals pieces in
+// flight, so bound it by passing few pieces per wave: the harness's own cap
+// is sized for CPU threads, not for capture-heavy work like headless browsers.
 const results = await pipeline(selected, async (piece) => {
   let verdict = CARRY[piece.id] || null;
   let round = 0;
   const history = [];
+  // Seed the plateau history with the carried verdict as round 0, so round 1
+  // of THIS wave is a real cross-wave plateau check — without this, a piece
+  // that plateaued across waves buys two fresh rounds before anyone notices.
+  if (verdict?.score != null) {
+    history.push({ round: 0, score: verdict.score, blindPick: verdict.blindPick, gap: verdict.biggestGap });
+  }
 
   while (round < MAX_ROUNDS) {
     round++;
@@ -308,20 +353,38 @@ const results = await pipeline(selected, async (piece) => {
 });
 
 const done = results.filter(Boolean);
-log(`Wave complete: ${done.filter((r) => r.passed).length}/${done.length} passed.`);
+
+// pipeline() resolves a throwing item to null — silently. A dropped piece must
+// be the loudest line in the result, never a shrunken denominator.
+const dropped = selected.map((p) => p.id).filter((id) => !done.some((r) => r.piece === id));
+if (dropped.length) {
+  log(
+    `WARNING: ${dropped.length} piece(s) DROPPED mid-wave (a stage threw): ${dropped.join(', ')} — ` +
+      `read the journal and the agent transcripts before trusting anything else in this result.`,
+  );
+}
+
+log(`Wave complete: ${done.filter((r) => r.passed).length}/${selected.length} passed${dropped.length ? `, ${dropped.length} DROPPED` : ''}.`);
 
 return {
   passed: done.filter((r) => r.passed).map((r) => r.piece),
   plateaued: done.filter((r) => r.plateaued).map((r) => r.piece),
-  // Feed `outstanding` straight back in as the next run's `carry`.
-  outstanding: done
-    .filter((r) => !r.passed)
-    .map((r) => ({
-      piece: r.piece,
-      score: r.verdict?.score,
-      gap: r.verdict?.biggestGap,
-      directive: r.verdict?.directive,
-      evidence: r.verdict?.evidence,
-    })),
+  dropped,
+  // Keyed by piece id, with exactly the fields the builder prompt reads —
+  // feed `outstanding` straight back in as the next run's `carry`, unchanged.
+  outstanding: Object.fromEntries(
+    done
+      .filter((r) => !r.passed && r.verdict)
+      .map((r) => [
+        r.piece,
+        {
+          score: r.verdict.score,
+          blindPick: r.verdict.blindPick,
+          biggestGap: r.verdict.biggestGap,
+          directive: r.verdict.directive,
+          evidence: r.verdict.evidence,
+        },
+      ]),
+  ),
   detail: done,
 };

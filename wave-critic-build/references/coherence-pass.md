@@ -154,9 +154,13 @@ That sentence is worth more than the score attached to it.
 
 ## Cadence
 
-Run one between every wave, once pieces have merged. Two rounds is usually right:
-the first finds structural seams, the second checks the fixes and finds the seams
-the fixes created.
+Run one after any wave that merged **two or more pieces**, and always before the
+board is allowed to read as green. (The recorded run got its marquee findings
+from a pass after four waves had merged; a pass between literally every wave
+roughly doubles the loop's cost without evidence of matching return — survey,
+smooth and judge are whole-repo agents.) Two rounds is usually right: the first
+finds structural seams, the second checks the fixes and finds the seams the
+fixes created.
 
 If a survey reports zero seams, go straight to judgement rather than smoothing —
 but be suspicious. Zero seams after a wave that merged three pieces usually means

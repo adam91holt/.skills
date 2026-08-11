@@ -42,7 +42,12 @@ evaluating the work — than one that says *passed*. It also means resuming late
 cheap: the next wave starts from a measured directive rather than a rediscovery.
 
 The wave template implements `(b)` directly: two rounds of movement under half a
-point returns `plateaued: true` instead of buying another round.
+point returns `plateaued: true` instead of buying another round — and it seeds a
+carried verdict's score into the history as round 0, so the first round of a new
+wave is a real *cross-wave* plateau check rather than needing two fresh rounds.
+Cross-wave regressions (a piece scoring below its carried score, which the
+recorded run saw) still belong to the ledger: compare each wave's scores against
+the carried ones when updating it.
 
 ---
 
@@ -96,6 +101,15 @@ has no caller.
 If you have a token or time budget, express it as a hard ceiling in the
 orchestrator, not as a hope. Scale depth to it: a fixed fleet size when the budget
 is known, or a loop that checks remaining budget before buying another round.
+
+The harness gives workflow scripts this for free: a `budget` global
+(`budget.total`, `budget.spent()`, `budget.remaining()`) fed by a "+500k"-style
+directive in the user's message, and it is genuinely hard — `agent()` throws once
+`spent()` reaches `total`. So the guard is one line before buying another round:
+`if (budget.total && budget.remaining() < ROUND_COST) return escalate(...)`.
+Humans also simply want to know the number — the recorded run's user asked "how
+many tokens have been used so far?" on day six — so put spend on the board, not
+just in the terminal.
 
 And spend it where it converts. Rounds one through three of a piece move the score
 most; rounds five and six of a plateaued piece move it least. When budget is

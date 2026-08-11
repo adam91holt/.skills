@@ -72,8 +72,8 @@ Read freely; only the owning module writes to its own slot.
 
 | Module | Owns | Provides |
 |---|---|---|
-| **core** | `src/core/*` | engine, loop, harness, config |
-| **<module>** | `src/<module>/**` | ... |
+| **core** | `src/core/*`, the entry point, `src/registry/` (the directory and loader, not the files in it) | engine, loop, harness, config, registry loader |
+| **<module>** | `src/<module>/**`, `src/registry/<module>.*` | ... |
 | *shared* | this file, `tools/**` | coordinate before editing |
 
 Globs must be **disjoint**. Overlap is the one failure mode parallel agents
@@ -81,6 +81,21 @@ cannot recover from.
 
 Need a change in someone else's file? Either emit an event they already listen
 for, or state the request in your final report so the orchestrator routes it.
+
+**Registration.** New modules register by adding a **new file** under
+`src/registry/` — each piece's ownership globs include its own
+`src/registry/<module>.*`, so disjointness holds by glob, not just by
+convention. The entry point loads everything in that directory and is owned by
+**core**. No builder edits the entry point — two agents landing modules in the
+same wave would collide there, and that is the one collision this table cannot
+arbitrate after the fact.
+
+Two Phase 0 obligations that make this work: core creates `src/registry/` and
+its loader **before wave 1** (a builder told "say so in your report if the
+registry doesn't exist" otherwise ships a module nothing ever calls — the
+`dead-end` seam), and the loader mechanism is stack-specific, so name it here:
+`import.meta.glob` under Vite; a generated index file owned by core for plain
+ESM, Go, or other compiled stacks.
 
 ### The one exception: the coherence pass
 

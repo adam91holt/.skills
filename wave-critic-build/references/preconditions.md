@@ -115,6 +115,14 @@ A probe that calls the harness's step/render may latch the product into a bench
 mode where the thing being measured stops happening. If a probe must only *read*,
 say so at the top of the probe.
 
+And one instrument no harness replaces: **a human who can reach the product.**
+If it can be deployed, deploy it in Phase 0 and put the URL on the board. In the
+recorded run, an inverted steering axis survived ~70 builder/critic pairs and
+every automated check for five days; the user played the newly deployed build
+for forty minutes and reported it immediately. Log every human-reported defect
+as a critic verdict — it is the cheapest, highest-yield instrument the loop
+will ever get.
+
 ---
 
 ## 3. A written contract, encoded as types
@@ -152,6 +160,21 @@ Pick one where the reference behaviour is widely known and richly specified —
 a shipped game, a well-known app's specific view, an API with a published error
 taxonomy. Name the *moments* you will compare, not just the product.
 
+Two hard checks before you trust the loop to it:
+
+- **The user names it.** If the ask says "AAA quality", stop and ask — offer
+  three plausible shipped products (build-kickoff's Q1). An adjective gives the
+  critic nothing to recall.
+- **The model knows it.** The critic writes its reference *from memory*, so a
+  benchmark outside the model's knowledge — a niche product, anything newer
+  than its cutoff, an internal tool — produces a hallucinated reference, and
+  the three-signal gate then scores real captures against fiction. Test it
+  before wave 1: have a critic write the Step 1 reference cold and check it
+  against reality yourself. If recall is thin, give critics a **reference
+  corpus** (docs, screenshots, captured API responses) and change Step 1 to
+  "read the corpus first" — knowingly trading away the memory-first anchoring
+  trick, which beats anchoring to a hallucination.
+
 ---
 
 ## 5. A ledger
@@ -168,5 +191,12 @@ A board is worth reading precisely when it says *"the item slot is empty for 87%
 a race"* rather than *"items need work"*. It is also the only place the honest
 state of the project lives — the agents' own reports are systematically optimistic.
 
-Render it to one self-contained HTML file and publish it. A build nobody can watch
-is a build nobody trusts.
+Render it to one self-contained HTML file and publish it — in Claude Code, the
+**Artifact tool** is the mechanism. One caveat that matters for a loop designed
+to survive session replacement: same-file-path redeploys keep the same URL only
+*within the session that first published it*; a replaced session must pass the
+board's existing URL explicitly (the `url` parameter) or it mints a fresh link
+and strands the human's bookmark. So the board's URL belongs in the tick
+prompt, next to the queue. The recorded run's board went up just over an hour
+into day one and was redeployed on every wave. A build nobody can watch is a
+build nobody trusts.

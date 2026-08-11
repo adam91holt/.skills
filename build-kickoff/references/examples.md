@@ -92,6 +92,13 @@ Between major waves, spawn one fresh agent to use the whole app end to end and
 smooth everything into one coherent thing. It owns the whole repo, it can delete
 anything built but unreachable, and it runs alone.
 
+Run the loop from a scheduler that survives restarts — a server-side Routine
+that fires hourly and can wake a suspended container, never an in-session
+timer. Every tick, prove the wave is actually alive from the age of the main
+agent process before doing anything else, and resume dead runs instead of
+relaunching them so finished work comes back from cache. If I ask whether it's
+running, check first, then answer.
+
 Keep a simple live progress page updated as you work — one row per piece, its
 score, and the critic's own words about what's still wrong. Message me only when a
 wave lands, a wave had to be restarted, something needs a decision, or it's
@@ -146,6 +153,10 @@ Between major waves, spawn one fresh agent to use the whole API as an integrator
 would, and smooth it into one coherent thing — one error taxonomy, one pagination
 convention, one naming register. It owns the whole repo and runs alone.
 
+Run this overnight from a scheduler that survives restarts — a server-side
+Routine, not an in-session timer. Each tick, prove the wave is alive from the
+age of the main agent process, and resume dead runs rather than relaunching.
+
 Keep a live progress page. Message me only when a wave lands, a wave had to be
 restarted, something needs a decision, or it's finished.
 
@@ -160,7 +171,9 @@ sub-agents and ultracode.
 Every structural clause. The benchmark, delegated decomposition, disjoint
 ownership, fresh-context critic, *never the builder's summary*, memory-first blind
 A/B, single gap with a measurement, a termination rule, the coherence pass, the
-ledger, the reporting rule, the triggers.
+ledger, the reporting rule, the triggers — and, for anything unattended, the
+scheduler paragraph (survives restarts, liveness by process age,
+resume-not-relaunch), which the original lacked and paid 67.5 silent hours for.
 
 ## What changes
 

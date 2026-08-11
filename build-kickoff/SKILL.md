@@ -7,7 +7,7 @@ description: >
   someone wants a prompt written to launch a large build rather than wanting the
   build run right now: "write me a prompt to build X", "make me a super prompt",
   "I want to kick off a big build", "help me start a multi-agent build", "turn
-  this idea into a prompt", or when they describe something large and joyful they
+  this idea into a build prompt", or when they describe something large and joyful they
   want at the quality of a named product and are clearly at the very start. It
   asks a short round of questions — above all what shipped product is the bar —
   and emits a prompt that trips the wave-critic-build skill when fired. Not for
@@ -56,11 +56,14 @@ domain in their ask — the ones below are the shape, not the literal text.
 ### Q1. The benchmark — *"What existing product is the bar?"*
 
 The most important question you will ask. Offer 3 named, shipped products
-plausible for their domain, and make the recommended one the first option.
+plausible for their domain; make the recommended one the first option and append
+"(Recommended)" to its label.
 
 Games → *Mario Kart 8 Deluxe*, *Celeste*, *Hades*. Web apps → *Linear*,
 *Stripe Checkout*, *Superhuman*. Services → *Stripe's API*, *Twilio's API*.
-Pipelines → a published schema or convention.
+Pipelines → a published schema or convention. Prefer products the model
+demonstrably knows well — the critics write the reference *from memory*, so an
+obscure or post-cutoff product buys a hallucinated reference.
 
 **If they answer with an adjective** — "AAA quality", "really polished",
 "professional" — do not accept it and move on. Ask again, once, plainly: *which
@@ -75,7 +78,7 @@ and write the prompt with the closest named thing you can find.
 |---|---|
 | One wave, then I review | No orchestrator loop; ends after a wave and reports |
 | Supervised — I'm around today | `/loop`, waves land while they watch |
-| Unattended — overnight / for days | Adds the hourly orchestrator loop, the ledger, and the messaging rule |
+| Unattended — overnight / for days | Adds the scheduler paragraph (a wake mechanism that survives restarts, liveness by process age, resume-not-relaunch), the ledger, and the messaging rule |
 
 ### Q3. Termination — *"How does this end?"*
 
@@ -156,13 +159,17 @@ because they will want to read it before firing it.
 
 Then tell them how to fire it, in one line:
 
-> Start a fresh session at the repo root and paste it. Include the word
-> `ultracode` if you want the multi-agent orchestration opted in from the first
-> turn.
+> Start a fresh session at the repo root and paste it. In Claude Code, the
+> prompt's last line `ultracode` — and "fan out sub-agents" in your own words —
+> opts multi-agent orchestration in from the first turn; in other environments
+> the same phrases still read as plain instructions.
 
 A fresh session matters: the kickoff prompt is written to be read cold, and a
 session already full of the conversation that produced it will anchor to that
-instead.
+instead. The prompt does not depend on `wave-critic-build` being installed in
+the target session — it encodes the whole loop in natural language (that is
+what `references/anatomy.md` documents) — though having the skill there hands
+the fired session its templates instead of making it derive them.
 
 **Do not fire it yourself** unless they ask you to. This skill ends with the
 prompt in their hands.
