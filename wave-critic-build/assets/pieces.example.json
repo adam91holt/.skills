@@ -1,0 +1,69 @@
+{
+  "$comment": [
+    "The piece manifest. For most projects this and CONTRACT.md are the only files",
+    "you write by hand — the two workflow templates read this and need no editing.",
+    "",
+    "RULES FOR SPLITTING INTO PIECES:",
+    "  1. `owns` globs must be DISJOINT across every piece. Overlap is the one",
+    "     failure mode parallel agents cannot recover from.",
+    "  2. A piece must be judgeable ALONE, from the review sheet, by someone who",
+    "     has not seen the code. If you cannot name the shots that show it, it is",
+    "     not a piece — it is a seam, and it belongs to the coherence pass.",
+    "  3. `brief` states what EXISTS today and what is MISSING, concretely. Vague",
+    "     briefs produce vague work; every brief below names a measurement or a",
+    "     file the builder can check.",
+    "  4. `shots` names states from the review sheet. A piece whose shots do not",
+    "     show its work will be judged on something else."
+  ],
+
+  "project": {
+    "name": "EXAMPLE",
+    "repo": "/absolute/path/to/repo",
+    "benchmark": "Linear's issue view (web, 2025)",
+    "passScore": 8.5,
+    "contract": "CONTRACT.md",
+    "types": "src/types.ts",
+    "gates": [
+      "npm run typecheck",
+      "npm run smoke"
+    ],
+    "observe": [
+      "node tools/capture.mjs                      full review sheet -> shots/",
+      "node tools/capture.mjs --list               every available state",
+      "node tools/capture.mjs --only list,empty --out /tmp/x",
+      "node tools/trace.mjs --seconds 20           telemetry over time"
+    ],
+    "rules": [
+      "The quality bar is <BENCHMARK>. Not \"good for a side project\". If the team that shipped <BENCHMARK> would flag it, it is not done.",
+      "STRICT FILE OWNERSHIP. Only edit the files in your brief. Other agents are editing other files right now. Touching a file you do not own gets reverted and wastes the round. Need a change elsewhere? Say so in your report.",
+      "Deterministic: seeded RNG, frozen clock, no wall-clock reads in logic that decides outcomes.",
+      "Never break the harness — every reviewer drives the product through it, so breaking it makes your work unjudgeable.",
+      "No new runtime dependencies without saying so in your report."
+    ],
+    "state": "Describe honestly where the project is today, in three or four sentences. Every builder and every critic reads this, so a stale one costs a round."
+  },
+
+  "pieces": [
+    {
+      "id": "list",
+      "name": "The list view",
+      "owns": "src/views/list/**",
+      "shots": "list-empty,list-dense,list-loading,list-error",
+      "brief": "Own the primary list. It renders rows and nothing else: no grouping, no keyboard navigation, no empty state, no density control. Build grouping by any column with sticky group headers; full keyboard navigation including range select; a real empty state that tells the user what to do next rather than showing a shrug; and a loading state that reserves layout so the page does not jump. It must stay readable at 500 rows and at 3 rows."
+    },
+    {
+      "id": "detail",
+      "name": "The detail pane",
+      "owns": "src/views/detail/**",
+      "shots": "detail,detail-editing,detail-mobile",
+      "brief": "Own the detail pane. Describe what exists and what is missing, concretely."
+    },
+    {
+      "id": "perf",
+      "name": "Performance",
+      "owns": "src/perf/** plus render-budget changes anywhere",
+      "shots": "list-dense,detail",
+      "brief": "Own the frame and payload budget. Measure first, then cut — do not guess at what is expensive. Add whatever counters you need to the harness's stats(). Hard constraint: nothing you do may change a single observable output. Prove it — run the same fixture at two quality levels and diff the snapshots."
+    }
+  ]
+}
