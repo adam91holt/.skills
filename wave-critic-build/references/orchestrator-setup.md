@@ -118,11 +118,16 @@ ls -t "$WFDIR" | head -3          # should show wf_* run dirs, newest first
 
 ### The trap: WFDIR contains a session id
 
-The path embeds the session that launched the workflow. **A restarted
-orchestrator session gets a new session directory** — so a `WFDIR` pinned in the
-prompt goes stale exactly when the container restarts, which is exactly when you
-most need the liveness check to work. The symptom is a tick that reports "no runs
-found" and cheerfully launches a duplicate wave alongside the one still running.
+The path embeds the *session* that launched the workflow. Be precise about what
+invalidates it, because the recorded run shows both sides: a **persistent
+session keeps its id across container restarts and even context compaction** —
+a pinned WFDIR there survived days of suspends — but the moment the loop runs
+in a **replaced session** (a fresh-session Routine, a new session taking over,
+a relaunched loop), the pinned path points at the dead session's directory. The
+symptom is a tick that reports "no runs found" and cheerfully launches a
+duplicate wave alongside the one still running. Since nothing guarantees the
+session running a future tick is the one that launched the wave, treat the
+pinned path as a hint and resolve the real one every tick.
 
 Two ways to handle it, and you want both:
 
@@ -152,23 +157,49 @@ command that errors is read by an agent as "no evidence of death".
 
 ## Step C — Choose how it wakes
 
-| Mechanism | Session continuity | Survives a restart | Use when |
+> **The scheduler must live outside the thing it schedules.** Anything that runs
+> inside the session — an in-memory cron, a re-armed reminder chain, a `/loop` —
+> dies in exactly the event it exists to detect.
+
+This is the most expensive lesson in the recorded run, and it dwarfs every wave
+stall: the loop went silent for **67.5 hours**, bridged only by the human asking
+"is it definitely still running?". The chain: an hourly `send_later` re-arm
+worked seven times, then one re-arm call failed (the MCP tool's name had changed
+mid-session) and the chain was dead. The fallback was the harness cron — whose
+own tool result says *"Session-only (not written to disk, dies when Claude
+exits)"* — and the container suspended, taking the cron with it. So did the
+12-minute liveness cron: *"it's in-memory, so it can't survive the thing it
+exists to detect."* What fixed it, permanently, was a **server-side Routine**:
+*"Routines are server-side — they survive suspension and wake the session,
+unlike the in-memory cron. That's the actual fix."* It then fired hourly without
+a miss for the rest of the build.
+
+Durability hierarchy, most durable first:
+
+| Mechanism | Session continuity | Survives suspend/restart | Verdict |
 |---|---|---|---|
-| `/loop 1h <pointer>` | Same session, full history | No — dies with the session | You are around, supervising the first day |
-| A scheduled agent / routine on cron | Fresh session each tick | Yes | Unattended, overnight, multi-day |
-| System cron → your CLI in headless mode | Fresh session each tick | Yes | You own the box and want it outside the app |
+| **Server-side Routine** (`create_trigger`, claude-code-remote MCP) bound to the persistent session | Same session, full history | **Yes — fires server-side and revives the container** | **The default for anything unattended** |
+| Server-side Routine, fresh session per fire | None — each tick starts cold | Yes | Works; every tick pays the cold-start, and resume is unavailable (see below) |
+| `send_later` re-arm chain | Same session | The *pending* one survives — but every tick must successfully re-arm, and one failed call kills the loop silently | Acceptable short-term; know its failure mode |
+| In-session cron (`CronCreate`) or `/loop 1h <pointer>` | Same session | **No — in-memory, dies with the container** | Supervised, same-day work only |
+| System cron → CLI headless | Fresh session each tick | Yes | You own the box and want it outside the app |
 
-Hourly is the right default. It is long enough that a wave makes real progress
-between ticks and short enough that a dead wave costs one hour, not a night.
+Hourly is the right default (for Routines it is also the minimum interval). It
+is long enough that a wave makes real progress between ticks and short enough
+that a dead wave costs one hour, not a night.
 
-> Whichever you pick, **write the prompt for the fresh-session case.** Even the
-> same-session options lose their history to a container suspend, and a prompt
-> that quietly depends on continuity fails in the one scenario it exists to
-> handle.
+> Whichever you pick, **write the prompt for the fresh-session case.** Even a
+> persistent session loses its history to context compaction — the recorded run
+> hit that on day four — and a prompt that quietly depends on continuity fails
+> in the one scenario it exists to handle.
 
-The corollary is that the loop must be idempotent per tick. Two ticks firing
-against the same state — which happens after a restart — must not produce two
-waves. That is what the STEP 1 liveness check is protecting.
+Two corollaries. The loop must be idempotent per tick: two ticks firing against
+the same state — which happens after a restart — must not produce two waves;
+that is what the STEP 1 liveness check protects. And **resume is same-session
+only**: a wave can only be resumed from the session that launched it, so a
+fresh-session tick that finds a dead run skips straight to journal-rescue —
+read the earned verdicts out of the dead run's journal and relaunch with them
+as `carry` — rather than discovering the constraint as an error.
 
 ---
 
@@ -300,6 +331,8 @@ is an hour of analysis. Losing it costs that hour twice.
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| The loop stops ticking entirely, for hours or days | The scheduler lived inside the session — an in-memory cron or a re-arm chain with one failed link | A server-side Routine. Cost when it bit: 67.5 hours, caught by the human, not the loop |
+| The loop answers "still running" and it is dead | A status question answered from inference, not from the liveness procedure | Any "is it running?" runs STEP 1 first |
 | Tick asks a question instead of acting | An unfilled slot in the prompt | Fill every `<angle bracket>` before scheduling |
 | Duplicate waves running | `WFDIR` stale after a session restart | Resolve by glob, sanity-check against `date -u` |
 | "No runs found", then a fresh launch | Same as above | Same as above |

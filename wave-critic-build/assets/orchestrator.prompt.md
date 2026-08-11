@@ -32,11 +32,12 @@ stale on exactly the restart you need to detect):
 Sanity-check it: newest run in $WFDIR against `date -u`. A newest run that is days
 old means the glob found a dead session dir, NOT that the wave is dead.
 
-EVERY TICK, before anything else: `node tools/session.mjs`. It refreshes the
-conversation archive — the prompts that are building this product, which are
-closer to the source than the code is. It exits non-zero if a message body was
-truncated; if that happens fix the tool rather than committing a mangled archive.
-Commit the refresh with whatever else the tick produces.
+STEP 0 — <only if the user asked for a published conversation archive; delete
+this step if they have not>. Run `node tools/session.mjs` before anything else.
+It refreshes the conversation archive — the prompts that are building this
+product, which are closer to the source than the code is. It exits non-zero if a
+message body was truncated; if that happens fix the tool rather than committing
+a mangled archive. Commit the refresh with whatever else the tick produces.
 
 Do NOT trust any run id written here — resolve it: RUN=$(ls -t $WFDIR | head -1).
 Current run: <what you believe is running>.
@@ -67,7 +68,13 @@ STEP 2 — If DEAD: RESUME, DO NOT RELAUNCH.
   Workflow({scriptPath:"<script>", resumeFromRunId:"<the dead RUN>", args:<the SAME args object, byte-for-byte>})
 Completed agent calls return from cache instantly and only the killed agents
 re-run, carry intact. Args must match exactly or the cache misses and you buy the
-whole wave again.
+whole wave again. Pass args as a REAL JSON OBJECT, never a JSON-encoded string —
+a stringified args once meant carry never reached a single builder for three
+days while every wave reported itself healthy.
+RESUME IS SAME-SESSION ONLY. If this tick is not running in the session that
+launched the dead run (fresh-session Routine, replaced session), do not try it:
+go straight to the journal-rescue below and relaunch fresh with the earned
+verdicts as carry.
 First run the gates, then commit and push whatever exists (say in the message if
 it is unverified). Read the dead run's journal for results that already have a
 `score` — those verdicts are EARNED and must never be re-bought; pass them
@@ -130,6 +137,11 @@ escalated under the termination policy: a piece whose score moved less than 0.5
 across two rounds does not get another round — it gets escalated to me, with the
 gap stated.
 
+If I ask "is it still running?" — or any status question — run STEP 1 and answer
+from its output, never from memory or from files existing. This loop once told
+its human "the builders are both running" twice while the wave had been dead for
+ten hours; the human's second ask was what caught it, not the monitoring.
+
 Message me only when a wave lands, a wave had to be restarted, something needs a
 decision, or the build is finished.
 ```
@@ -140,6 +152,9 @@ decision, or the build is finished.
 
 | Rule | The failure it prevents |
 |---|---|
+| Args as a real object, never a string | A stringified args starved every builder of carry for three days, silently |
+| Resume is same-session only | A replaced session burns its tick on a resume that can only error |
+| Status questions run STEP 1 first | The loop told its human "running" twice over a 10-hour corpse |
 | Resolve the run id, never trust the prompt | The prompt is stale the moment a wave relaunches |
 | `ls -t`, not `ls \| tail` | Alphabetical sort hid the only live agent behind eleven finished ones |
 | Liveness by **process age** | Files and browsers outlive the agents that made them — 11.5h stall |

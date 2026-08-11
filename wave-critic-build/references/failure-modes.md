@@ -10,6 +10,26 @@ is how you will meet them.
 
 ## "It's been quiet for a while"
 
+### The loop stopped ticking entirely
+**Cause.** The scheduler lived inside the session. An in-memory cron
+(`CronCreate`) dies with the container — as does a `/loop`. A `send_later`
+re-arm chain dies the first time one re-arm call fails; in the recorded run the
+MCP tool's name changed mid-session and the chain was dead. The 12-minute
+liveness cron died the same way: it cannot survive the thing it exists to
+detect.
+**Fix.** A **server-side Routine** (`create_trigger`) bound to the persistent
+session — it fires server-side and revives a suspended container. The scheduler
+must live outside the thing it schedules.
+**Cost when it bites:** 67.5 hours of silence in the recorded run, bridged only
+by the human asking "is it definitely still running?".
+
+### The loop says "still running", and it is dead
+**Cause.** A status question answered from inference — fresh-looking files,
+browser processes alive — instead of from the liveness procedure. Both are
+corpses that outlive their agents.
+**Fix.** Any "is it running?" from the human triggers STEP 1 before answering.
+The recorded run got this wrong twice across a single ten-hour corpse.
+
 ### Silent multi-hour stall
 **Cause.** Liveness judged by whether files exist, or by grepping for the agent
 process. Output files and browser profiles outlive the agents that made them, and

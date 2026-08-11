@@ -293,7 +293,10 @@ for (let round = 1; round <= MAX_ROUNDS; round++) {
   history.push({ round, seams: survey.seams.length, worst: survey.seams.slice(0, 5), verdict });
   log(`round ${round}: ${verdict.score}/10, blind pick "${verdict.blindPick}" — ${verdict.biggestGap}`);
 
-  if (verdict.pass && verdict.score >= PASS_SCORE) {
+  // Same three-signal gate as the wave: a judge that scores 9 while still
+  // picking the benchmark has contradicted itself, and the whole-product
+  // verdict is where a self-contradicting pass costs the most.
+  if (verdict.pass && verdict.score >= PASS_SCORE && verdict.blindPick !== 'benchmark') {
     log(`coherence passed at round ${round}`);
     return { passed: true, rounds: round, history };
   }

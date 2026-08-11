@@ -23,7 +23,7 @@ written to be correct when fired into a session that has never seen the project.
 ## The shape
 
 ```
-STEP 0 — publish the session archive
+STEP 0 — publish the session archive (only if the user asked for one)
 STEP 1 — PROVE the wave is alive
 STEP 2 — if DEAD: RESUME, do not relaunch
 STEP 3 — if ALIVE: run the gates, commit, push, do nothing else
@@ -79,6 +79,16 @@ the *identical second*.
 Also: **do not trust a run id written in the tick prompt.** It is stale the moment
 a wave relaunches. Resolve it: `RUN=$(ls -t $WFDIR | head -1)`.
 
+### Status questions get the procedure, not a recollection
+
+When the human asks *"is it still running?"*, that question **is** STEP 1 — run
+the liveness checks and answer from their output. The recorded run answered
+"the builders are both running" twice from inference (new files on disk, Chrome
+processes alive) while the wave had been dead for ten hours; in its own words
+afterwards: *"You asking twice is what caught it, not my monitoring."* The human
+poke is often the only stall detector that survives everything — never spend it
+on a remembered answer.
+
 ---
 
 ## Step 2 — Resume, never relaunch
@@ -95,6 +105,22 @@ carry intact. A suspend then costs the in-flight agents rather than the whole wa
 **The args must match byte-for-byte** or the cache misses and you buy the entire
 wave again. This is also why the workflow script should be manifest-driven and
 never edited between waves: an edited script is a script whose resume never hits.
+Pass args as a **real JSON object**, never a JSON-encoded string — the recorded
+run passed strings throughout, and against the original script that meant carry
+never reached a single builder for three days.
+
+**Resume is same-session only.** Only the session that launched a run can resume
+it. A tick firing in a replaced or fresh session must not try — it goes straight
+to the rescue path: read the dead run's journal for earned verdicts, relaunch
+fresh with them as `carry`. The recorded run relaunched fresh with identical args
+three times before resume entered its repertoire on day four; each relaunch
+re-bought finished builder/critic pairs. Put resume in the *first* tick prompt,
+not the fourth day's.
+
+And a quiet consequence of the cache: the manifest is read by an `agent()` call,
+so a resumed wave replays the **cached** manifest. Edits to `pieces.json` between
+death and resume have no effect until the next fresh wave — which is what keeps
+every downstream prompt byte-identical, so leave it be.
 
 Two sharp edges:
 

@@ -10,14 +10,26 @@
  *     scriptPath: "<repo>/tools/wave.workflow.mjs",
  *     args: {
  *       manifest: "<repo>/tools/pieces.json",   // required
- *       pieces:   ["list", "detail"],           // which ids to run this wave
+ *       pieces:   ["list", "detail"],           // REQUIRED — ids for this wave, or the string "all"
  *       rounds:   2,
  *       carry:    { list: <a prior verdict> }   // verdicts earned in a dead run
  *     }
  *   })
  *
+ * Pass `args` as a REAL JSON OBJECT, never a JSON-encoded string. The harness
+ * warns about this and the recorded run proves why: every launch passed a
+ * string, `args.pieces` read undefined against the original script, and carry
+ * never reached a single builder for three days. The parser below defends
+ * against the string shape, but defence is not an invitation.
+ *
  * RESUME: pass the SAME args object byte-for-byte with resumeFromRunId. Finished
- * agents replay from cache; only the killed ones re-run.
+ * agents replay from cache; only the killed ones re-run. Two constraints:
+ *   - Resume only works from the SESSION that launched the run. A replaced
+ *     session goes straight to journal-rescue + fresh launch with carry.
+ *   - The manifest is read by an agent() call, so a resume REPLAYS the cached
+ *     manifest. Edits to pieces.json between death and resume have no effect
+ *     until the next fresh wave — which also keeps every downstream prompt
+ *     byte-identical, so do not "fix" it.
  */
 
 export const meta = {
@@ -192,9 +204,13 @@ YOU OWN (and may only edit): ${piece.owns}
 ${piece.brief}
 ${feedback}
 
-If your module is new, you must also register it in the application entry point —
-that is the ONE file outside your ownership you may touch, and only to add your
-import and one registration line. Nothing else in it.
+If your module is new, register it by ADDING A NEW FILE under the registry
+directory named in the contract (e.g. src/registry/<your-piece-id>.ts) — the
+entry point loads everything in that directory and belongs to core. Never edit
+the shared entry point itself: other builders are landing modules in parallel,
+and two agents editing one file at once is the exact collision this contract
+exists to prevent. If the repo has no registry directory yet, say so in your
+report instead of touching files you do not own.
 
 Work until the piece is genuinely excellent, then verify with the gates above.
 Look at your own captured output before declaring done — capture the states
@@ -244,7 +260,21 @@ a user would notice, it fails.`;
 // ── run ────────────────────────────────────────────────────────────────────
 
 const byId = new Map(MANIFEST.pieces.map((p) => [p.id, p]));
-const ids = input.pieces?.length ? input.pieces : MANIFEST.pieces.map((p) => p.id);
+
+// `pieces` is REQUIRED. Running every piece is spelled `pieces: "all"`, on
+// purpose: the historical bug was exactly `args.pieces` arriving undefined and
+// a silent fall-through to defaults, which spent ninety minutes rebuilding
+// pieces that were already done. Absence must be loud, not interpreted.
+const ids =
+  input.pieces === 'all'
+    ? MANIFEST.pieces.map((p) => p.id)
+    : Array.isArray(input.pieces) && input.pieces.length
+      ? input.pieces
+      : (() => {
+          throw new Error(
+            'wave: args.pieces is required — a non-empty array of piece ids, or the explicit string "all".',
+          );
+        })();
 
 const missing = ids.filter((id) => !byId.has(id));
 if (missing.length) throw new Error(`wave: no such piece(s) in the manifest: ${missing.join(', ')}`);

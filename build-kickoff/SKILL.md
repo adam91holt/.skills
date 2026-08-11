@@ -56,7 +56,8 @@ domain in their ask — the ones below are the shape, not the literal text.
 ### Q1. The benchmark — *"What existing product is the bar?"*
 
 The most important question you will ask. Offer 3 named, shipped products
-plausible for their domain, and make the recommended one the first option.
+plausible for their domain; make the recommended one the first option and append
+"(Recommended)" to its label.
 
 Games → *Mario Kart 8 Deluxe*, *Celeste*, *Hades*. Web apps → *Linear*,
 *Stripe Checkout*, *Superhuman*. Services → *Stripe's API*, *Twilio's API*.
@@ -156,13 +157,17 @@ because they will want to read it before firing it.
 
 Then tell them how to fire it, in one line:
 
-> Start a fresh session at the repo root and paste it. Include the word
-> `ultracode` if you want the multi-agent orchestration opted in from the first
-> turn.
+> Start a fresh session at the repo root and paste it. The prompt's last line
+> already says `ultracode`, so multi-agent orchestration is opted in from the
+> first turn — and "fan out sub-agents" in your own words is itself an opt-in,
+> so it still works if you strip the keyword.
 
 A fresh session matters: the kickoff prompt is written to be read cold, and a
 session already full of the conversation that produced it will anchor to that
-instead.
+instead. The prompt does not depend on `wave-critic-build` being installed in
+the target session — it encodes the whole loop in natural language (that is
+what `references/anatomy.md` documents) — though having the skill there hands
+the fired session its templates instead of making it derive them.
 
 **Do not fire it yourself** unless they ask you to. This skill ends with the
 prompt in their hands.

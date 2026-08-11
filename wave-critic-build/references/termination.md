@@ -97,6 +97,15 @@ If you have a token or time budget, express it as a hard ceiling in the
 orchestrator, not as a hope. Scale depth to it: a fixed fleet size when the budget
 is known, or a loop that checks remaining budget before buying another round.
 
+The harness gives workflow scripts this for free: a `budget` global
+(`budget.total`, `budget.spent()`, `budget.remaining()`) fed by a "+500k"-style
+directive in the user's message, and it is genuinely hard — `agent()` throws once
+`spent()` reaches `total`. So the guard is one line before buying another round:
+`if (budget.total && budget.remaining() < ROUND_COST) return escalate(...)`.
+Humans also simply want to know the number — the recorded run's user asked "how
+many tokens have been used so far?" on day six — so put spend on the board, not
+just in the terminal.
+
 And spend it where it converts. Rounds one through three of a piece move the score
 most; rounds five and six of a plateaued piece move it least. When budget is
 tight, prefer **one more piece at three rounds** over **one more round on six

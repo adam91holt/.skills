@@ -61,9 +61,9 @@
     {
       "id": "perf",
       "name": "Performance",
-      "owns": "src/perf/** plus render-budget changes anywhere",
+      "owns": "src/perf/**",
       "shots": "list-dense,detail",
-      "brief": "Own the frame and payload budget. Measure first, then cut — do not guess at what is expensive. Add whatever counters you need to the harness's stats(). Hard constraint: nothing you do may change a single observable output. Prove it — run the same fixture at two quality levels and diff the snapshots."
+      "brief": "Own the frame and payload budget. Measure first, then cut — do not guess at what is expensive. Add whatever counters you need to the harness's stats(). Hard constraint: nothing you do may change a single observable output. Prove it — run the same fixture at two quality levels and diff the snapshots. Budget fixes needed in files you do not own go in your report as named, measured requests — rule 1 above binds this piece like any other, so either those edits are routed to the owning piece's next round, or this piece runs in a wave alone."
     }
   ]
 }

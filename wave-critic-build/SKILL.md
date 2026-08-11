@@ -278,6 +278,12 @@ A persistent session woken on a schedule (hourly works well), running a
 `references/orchestrator-setup.md` to stand it up; read
 `assets/orchestrator.example.md` to see a populated one.
 
+**The scheduler must live outside the thing it schedules.** Wake the session
+with a server-side Routine (`create_trigger`), not an in-session cron or a
+re-armed reminder chain — those die with the container, in exactly the event
+they exist to detect. In the recorded run that mistake cost 67.5 hours of
+silence, caught by the human, not the loop.
+
 ```
 STEP 0 — publish the session archive
 STEP 1 — PROVE the wave is alive
@@ -310,8 +316,11 @@ however recent the file timestamps look. Judging this wrong is what produces
 multi-hour silent stalls.
 
 **Resume, never relaunch.** Completed agent calls replay from cache; only the
-killed ones re-run, carry intact. The args must match **byte-for-byte** or the
-cache misses and you buy the whole wave again.
+killed ones re-run, carry intact. The args must match **byte-for-byte** — passed
+as a real JSON object, never a string — or the cache misses and you buy the
+whole wave again. Resume is **same-session only**: a replaced session skips
+straight to journal-rescue and relaunches fresh with the earned verdicts as
+carry.
 
 **Verify before walking away.** After any launch or resume, grep the new agent
 transcripts for the piece name and the carried observations. A silent arg-parsing
@@ -387,6 +396,8 @@ the most:
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| The loop stops ticking for days | Scheduler lived in-session: in-memory cron, or a re-arm chain with one failed link | A server-side Routine; the scheduler must outlive the container |
+| "Still running" reported over a corpse | Status question answered from inference | Any "is it running?" runs the liveness procedure first |
 | Silent multi-hour stall | Liveness judged by files or process greps | Judge by main-process age |
 | A wave rebuilds finished work | Args arrived as a string; script fell through to defaults | Throw on unparseable args |
 | One piece of three gets built | A carry field threw inside a pipeline stage, dropping the item to null | Normalise carry; grep transcripts after launch |

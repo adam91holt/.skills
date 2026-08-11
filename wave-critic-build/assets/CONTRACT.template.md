@@ -82,6 +82,12 @@ cannot recover from.
 Need a change in someone else's file? Either emit an event they already listen
 for, or state the request in your final report so the orchestrator routes it.
 
+**Registration.** New modules register by adding a **new file** under
+`src/registry/` (owned by the piece that adds it); the entry point loads
+everything in that directory and is owned by **core**. No builder edits the
+entry point — two agents landing modules in the same wave would collide there,
+and that is the one collision this table cannot arbitrate after the fact.
+
 ### The one exception: the coherence pass
 
 Strict ownership is what lets many agents edit this repo at once, and it has a

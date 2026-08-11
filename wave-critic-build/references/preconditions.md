@@ -168,5 +168,8 @@ A board is worth reading precisely when it says *"the item slot is empty for 87%
 a race"* rather than *"items need work"*. It is also the only place the honest
 state of the project lives — the agents' own reports are systematically optimistic.
 
-Render it to one self-contained HTML file and publish it. A build nobody can watch
-is a build nobody trusts.
+Render it to one self-contained HTML file and publish it — in Claude Code, the
+**Artifact tool** is the mechanism: publishing the same file path again redeploys
+to the same URL, so the board's link stays stable for the whole build. The
+recorded run's board went up nineteen minutes into day one and was redeployed on
+every wave. A build nobody can watch is a build nobody trusts.
