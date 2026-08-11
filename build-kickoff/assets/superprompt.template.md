@@ -25,9 +25,10 @@ with every single thing done at <BENCHMARK>-quality — from <AXIS 1> to
 
 Before you spawn a single builder: stand up the harness. I need <a way to drive
 this thing into any state and dump ground truth about it, deterministically>,
-one command that captures <every state worth looking at, by name>, and the
-progress page below. Don't start building until those exist — retrofitting them
-costs a wave of work that gets thrown away.
+one command that captures <every state worth looking at, by name>, a test
+runner wired to the same seeded determinism, and the progress page below.
+Don't start building until those exist — retrofitting them costs a wave of
+work that gets thrown away.
 
 Break <THE THING> into the smallest pieces that can be improved and judged on
 their own — you decide what the pieces are, not me. Each piece owns its own
@@ -42,7 +43,8 @@ The critic writes down what <BENCHMARK> does from memory before it opens ours at
 all, then compares them side by side blind and says which one is better. When
 ours loses, it names the single biggest gap — one, not a list — with a
 measurement I could check myself, and sends the builder back in to close exactly
-that.
+that. Once a gap is closed, turn its measurement into an automated test that
+runs with every build, so it can never quietly come back.
 
 <TERMINATION CLAUSE — pick one from below>
 

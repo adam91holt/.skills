@@ -27,6 +27,7 @@
     "types": "src/types.ts",
     "gates": [
       "npm run typecheck",
+      "npm test",
       "npm run smoke"
     ],
     "observe": [
@@ -39,6 +40,7 @@
       "The quality bar is <BENCHMARK>. Not \"good for a side project\". If the team that shipped <BENCHMARK> would flag it, it is not done.",
       "STRICT FILE OWNERSHIP. Only edit the files in your brief. Other agents are editing other files right now. Touching a file you do not own gets reverted and wastes the round. Need a change elsewhere? Say so in your report.",
       "Deterministic: seeded RNG, frozen clock, no wall-clock reads in logic that decides outcomes.",
+      "Guard your piece's logic with fast deterministic tests inside your ownership (the harness gives you reset({seed}) and a frozen clock). When you close a critic's gap, its measurement becomes a ratchet test in the same commit — a closed gap without one is not closed.",
       "Never break the harness — every reviewer drives the product through it, so breaking it makes your work unjudgeable.",
       "No new runtime dependencies without saying so in your report."
     ],

@@ -113,6 +113,9 @@ and never commit files a live agent owns.
 STEP 4 — If FINISHED:
   a. Run the gates weakest-first, and fix anything broken. Typecheck-clean has
      passed on a build that did not boot; the smoke run is the real gate.
+     A carried gap that just closed must have landed WITH its ratchet test —
+     the verdict's measurement, automated, in the same commit. No test, not
+     closed: reopen it on the ledger.
   b. Capture the full review sheet and LOOK at the output with the Read tool.
      Never trust an agent's summary.
   c. Update the ledger with the REAL verdicts — the critic's own measured words,

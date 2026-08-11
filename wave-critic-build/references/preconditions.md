@@ -60,6 +60,7 @@ Per-archetype designs are in `harness-recipes.md`.
 | Artifact | Why |
 |---|---|
 | A **smoke** command with a non-zero exit | The only gate that proves the product still starts |
+| A **test runner** wired to the same determinism (seed, frozen clock) | Builders guard their piece's logic cheaply, and every gap a critic closes becomes a **ratchet test** that keeps it closed |
 | A **`--list`** of every state on the review sheet | Otherwise nobody knows what can be looked at |
 | An **`--only a,b --out dir`** selector | Critics capture just their piece; full sheets are slow |
 | A **trace** over time, not just snapshots | Some defects exist only as a shape across time |

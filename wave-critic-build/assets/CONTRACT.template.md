@@ -37,7 +37,12 @@ that shipped <BENCHMARK> would flag it, it is not done.
 5. **<Budget>** — e.g. 60fps on a mid laptop; p95 under 200ms; bundle under 500KB.
 6. **Leave it running.** Every commit must leave the product working. Verify with
    the smoke gate before you finish.
-7. **<Language-specific trap that has already cost a build.>** Every repo grows
+7. **Tests ride with the piece.** Fast, deterministic tests live inside your
+   ownership globs and run in the test gate — the harness's seeded RNG and
+   frozen clock make them cheap and stable. When a critic's measured gap is
+   closed, the measurement becomes a **ratchet test in the same commit as the
+   fix**: closed gaps do not silently reopen.
+8. **<Language-specific trap that has already cost a build.>** Every repo grows
    one. Write it down the first time it costs a green build, not the second.
 
 ---
@@ -179,5 +184,7 @@ meet make the same call. Name exact tokens, not adjectives.>
 - Meets the budget in §2.
 - Looks and behaves intentionally in every state a user can reach.
 - Has feedback for every state change — no silent transitions.
+- The test gate passes, including every ratchet test — every gap a critic ever
+  closed on this piece is still closed.
 - The smoke gate passes.
 - Nothing in the console. No warnings, no errors.

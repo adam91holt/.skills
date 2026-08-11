@@ -267,6 +267,7 @@ Full template and the reasoning: `orchestrator-setup.md`.
 | Gate | Strength | What it proves |
 |---|---|---|
 | Typecheck / lint | Weak | The modules still agree about their interfaces |
+| Unit + ratchet tests | Medium | The pieces' logic invariants hold, and no gap a critic ever closed has reopened |
 | Smoke run | **Real** | It still boots and runs |
 | Look at the captured output | **Truth** | It is what you think it is |
 
