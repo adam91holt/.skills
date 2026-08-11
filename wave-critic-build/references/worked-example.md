@@ -112,14 +112,20 @@ modules must agree on is not a tuning constant, it is an interface.**
 
 ## The bug that justifies the "real user path" rule
 
-Steering was mirrored for weeks and the harness **structurally could not catch
-it**: `setInput()` writes the virtual input and short-circuits the exact device
-path that was broken. The AI drove correctly throughout — its maths was right —
-while a comment above it asserted the opposite convention on every count, and the
+Steering was mirrored for the **first five days** — ~70 builder/critic pairs and
+twelve named frames never caught it — and the harness **structurally could not**:
+`setInput()` writes the virtual input and short-circuits the exact device path
+that was broken. The AI drove correctly throughout — its maths was right — while
+a comment above it asserted the opposite convention on every count, and the
 keyboard mapping had been written to match the comment.
 
-The fix was a new instrument, `steercheck.mjs`, that dispatches **real key events**
-and measures which way the kart actually went.
+What caught it was not an instrument. On day five the user asked for a GitHub
+Pages deploy, played the game for forty minutes, and reported it. `steercheck.mjs`
+— the probe that dispatches **real key events** and measures which way the kart
+actually went — was written *after* that report, to verify the fix. Two lessons,
+not one: at least one instrument must drive the real input path, and a playable
+deploy in front of the human is an instrument no harness replaces (see
+`preconditions.md` §2).
 
 ---
 
@@ -135,6 +141,12 @@ in-flight agent. The adaptations became the orchestrator design:
 - **Short waves** — two pieces, two rounds.
 - A tick prompt that grew from ~900 to ~5,400 characters, one paragraph per
   failure.
+
+And the bill, measured on day six: **14.9B tokens** — 14.6B cache reads, ~297M
+cache writes, 6.8M output — across 278 subagent transcripts and a 2.5GB session
+archive. That is the number to weigh against "the setup is roughly a day; it
+pays back over days" when deciding whether a project clears the bar for this
+loop at all.
 
 Two silent-corruption bugs also shaped the templates: `args` arriving as a JSON
 string (which sent a wave to rebuild finished pieces for ninety minutes) and a

@@ -2,16 +2,17 @@
 name: wave-critic-build
 description: >
   Build something large and genuinely high-quality with a fleet of parallel agents,
-  judged by adversarial fresh-context critics, looping unattended until the work
-  matches a named benchmark. Covers the harness, the review sheet, the ownership
-  contract, the builder and critic prompts, the coherence pass, and the scheduled
-  orchestrator loop. Use this whenever someone wants many agents to build something
-  big — a game, an application, a service, a pipeline — or says any of "fan out
-  sub-agents", "/loop until it's perfect", "keep going until it's done", "build me a
-  whole X", "have another agent check it", "run overnight", or asks how to keep
-  quality high without a human reviewing every diff. Also use it when an existing
-  multi-agent build has stalled, keeps producing parts that don't fit together, or
-  never terminates.
+  judged by adversarial fresh-context critics, looping unattended until each piece
+  passes or measurably plateaus against a named benchmark. Covers the harness, the
+  review sheet, the ownership contract, the builder and critic prompts, the
+  coherence pass, and the scheduled orchestrator loop. Use this whenever someone
+  wants many agents to build something big — a game, an application, a service, a
+  pipeline — or, about a large build, says any of "fan out sub-agents", "/loop
+  until it's perfect", "keep going until it's done", "build me a whole X", "have
+  another agent check it", "run overnight", or asks how to keep quality high
+  without a human reviewing every diff. Also use it when an existing multi-agent
+  build has stalled, keeps producing parts that don't fit together, or never
+  terminates. Not for a single feature, bug fix, or one-off second-opinion review.
 ---
 
 # The wave/critic build loop
@@ -85,7 +86,13 @@ report into a *seed plus a timestamp* instead of an anecdote. See
 **The benchmark must be a named product, not an adjective.** "High quality" gives
 you nothing to compare against. "Mario Kart 8 Deluxe", "Linear's issue view",
 "Stripe Checkout", "Superhuman's command palette" all give the critic something
-concrete to recall and a blind A/B to run.
+concrete to recall and a blind A/B to run. If the user has not named one, **stop
+and ask before anything else** — offer three plausible shipped products, the way
+`build-kickoff`'s Q1 does. And prefer one the model demonstrably knows: the
+critic writes its reference *from memory*, so an obscure or post-cutoff product
+gets a hallucinated reference and the gate scores real captures against fiction
+(the recall check and the reference-corpus fallback are in
+`references/preconditions.md`).
 
 And one rule that is easy to skip and expensive to skip:
 
@@ -139,7 +146,9 @@ Structural choices worth preserving if you write your own:
 - **Concurrency is bounded by cores, not ambition.** Each capture run is a
   headless browser. Three of them on four cores starve each other into false
   negatives — and a critic reasoning from contended frames produces confident
-  nonsense.
+  nonsense. The bound is enforced by wave size: with one self-contained chain
+  per piece, pieces in flight *is* the concurrency, and the harness's own cap
+  is sized for CPU threads, not for what a headless browser weighs.
 - **Short waves.** Two pieces, two rounds. Long waves lose more to a crash than
   they gain in throughput.
 
@@ -278,13 +287,17 @@ A persistent session woken on a schedule (hourly works well), running a
 `references/orchestrator-setup.md` to stand it up; read
 `assets/orchestrator.example.md` to see a populated one.
 
-**How it wakes depends on where it runs.** On a local machine, `/loop` or an
-in-session cron is fine — the session lives as long as the machine does. In a
-remote environment the container suspends without warning, so the scheduler
-must live outside the thing it schedules: a server-side Routine
-(`create_trigger`), never an in-session cron or a re-armed reminder chain —
-those die with the container, in exactly the event they exist to detect. In the
-recorded run that mistake cost 67.5 hours of silence, caught by the human, not
+**How it wakes depends on where it runs.** On a local machine that never
+sleeps, `/loop` or an in-session cron is fine — the session lives as long as
+the machine does. In a remote environment the container suspends without
+warning, so the scheduler must live outside the thing it schedules: a
+server-side Routine (`create_trigger`). An in-session cron or `/loop` dies
+with the container — in exactly the event it exists to detect — and a
+`send_later` re-arm chain, whose pending reminder does survive suspends, has a
+single point of failure per tick: one failed re-arm and nothing ever fires
+again. The recorded run's killer was the fallback move — replacing a loudly
+failed re-arm with an in-memory cron whose own tool result said
+"session-only" — and it cost 67.5 hours of silence, caught by the human, not
 the loop.
 
 ```
@@ -319,11 +332,11 @@ however recent the file timestamps look. Judging this wrong is what produces
 multi-hour silent stalls.
 
 **Resume, never relaunch.** Completed agent calls replay from cache; only the
-killed ones re-run, carry intact. The args must match **byte-for-byte** — passed
-as a real JSON object, never a string — or the cache misses and you buy the
-whole wave again. Resume is **same-session only**: a replaced session skips
-straight to journal-rescue and relaunches fresh with the earned verdicts as
-carry.
+killed ones re-run, carry intact. The cache is keyed on each agent call's
+prompt, so re-pass the **exact args value verbatim** into an unedited script —
+that is what keeps every completed call's prompt identical. Resume is
+**same-session only**: a replaced session skips straight to journal-rescue and
+relaunches fresh with the earned verdicts as carry.
 
 **Verify before walking away.** After any launch or resume, grep the new agent
 transcripts for the piece name and the carried observations. A silent arg-parsing
@@ -405,10 +418,10 @@ the most:
 | A wave rebuilds finished work | Args arrived as a string; script fell through to defaults | Throw on unparseable args |
 | One piece of three gets built | A carry field threw inside a pipeline stage, dropping the item to null | Normalise carry; grep transcripts after launch |
 | Everything scores 8/10 | No calibration in the critic prompt | State that 7 is normal and the benchmark wins by default |
-| Good parts, incoherent whole | No coherence pass | Run one between every wave |
+| Good parts, incoherent whole | No coherence pass | Run one after any wave that merges two or more pieces |
 | A defect reported by five critics, fixed by none | It lives between owners | Coherence pass owns it |
-| Confident nonsense in a verdict | Captures taken while other agents contended for cores | Never capture during a wave |
-| Two waves running at once | `WFDIR` pinned; it embeds a session id and went stale on a restart | Resolve it by glob every tick |
+| Confident nonsense in a verdict | Captures taken while other agents contended for cores | Never capture during a wave on a contended harness (browsers, GPU) |
+| Two waves running at once | `WFDIR` pinned; it embeds a session id and went stale when a fresh session took over the loop | Resolve it by glob every tick |
 | A whole surface reaches "done" unjudged | The gates only drive the surface the harness drives | Keep a standing list of unjudged surfaces |
 | Parked work gets started anyway | No parked block, or its notes read as a checklist | Quote the user; label notes "reference, not instructions" |
 | The loop never ends | No termination policy | Phase 5 |

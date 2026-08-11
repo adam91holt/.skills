@@ -102,20 +102,25 @@ Workflow({ scriptPath: "<same script>",
 Completed agent calls replay from cache instantly; only the killed ones re-run,
 carry intact. A suspend then costs the in-flight agents rather than the whole wave.
 
-**The args must match byte-for-byte** or the cache misses and you buy the entire
-wave again. This is also why the workflow script should be manifest-driven and
-never edited between waves: an edited script is a script whose resume never hits.
-Pass args as a **real JSON object**, never a JSON-encoded string — the recorded
-run passed strings throughout, and against the original script that meant carry
-never reached a single builder for three days.
+**What actually keys the cache:** each completed `agent()` call replays when its
+(prompt, opts) are unchanged. "Byte-for-byte args" is the operational proxy —
+identical args into an unedited, manifest-driven script keep every completed
+call's prompt identical — which is also why the script must never be edited
+between waves: an edited script is a script whose resume never hits. Record the
+exact args value at launch and re-pass it verbatim on resume; whether it is an
+object or a JSON string matters less than it being the same bytes (the recorded
+run resumed successfully six times with stringified args — its three-day carry
+starvation came from a *script that read a stringified args without parsing
+it*, which the template now throws on).
 
-**Resume is same-session only.** Only the session that launched a run can resume
-it. A tick firing in a replaced or fresh session must not try — it goes straight
-to the rescue path: read the dead run's journal for earned verdicts, relaunch
-fresh with them as `carry`. The recorded run relaunched fresh with identical args
-three times before resume entered its repertoire on day four; each relaunch
-re-bought finished builder/critic pairs. Put resume in the *first* tick prompt,
-not the fourth day's.
+**Resume is same-session only** — per the Workflow tool's contract, and
+consistent with run directories living under the launching session's path. A
+tick firing in a replaced or fresh session must not try — it goes straight to
+the rescue path: read the dead run's journal for earned verdicts, relaunch
+fresh with them as `carry`. And put resume in the *first* tick prompt: the
+recorded run relaunched fresh with identical args three times — same-session
+relaunches made from ignorance, each re-buying finished builder/critic pairs —
+before resume entered its repertoire on day four.
 
 And a quiet consequence of the cache: the manifest is read by an `agent()` call,
 so a resumed wave replays the **cached** manifest. Edits to `pieces.json` between
@@ -149,15 +154,33 @@ itself started and looked healthy throughout.
 
 > **Anything that can silently mis-route a wave must throw rather than default.**
 
+And when verification *fails*: stop the run by its task id (TaskStop), fix the
+args or carry, relaunch with the same carry. Never `pkill`. The recorded run
+caught a carry TypeError forty seconds after launch exactly this way — stop,
+one-line fix, relaunch — and the replacement wave lost nothing.
+
 ---
 
 ## Step 3 — While a wave is alive, do almost nothing
 
 Run the gates, commit, push, and stop.
 
-**Do not run captures while agents are active.** Cores that are serving two
-headless browsers cannot serve a third, and the output you get is false evidence —
-which is worse than no evidence, because a critic will reason confidently from it.
+**Do not run captures while agents are active — on a harness that contends for
+the machine.** Cores that are serving two headless browsers cannot serve a
+third, and the output you get is false evidence — which is worse than no
+evidence, because a critic will reason confidently from it. The rule is about
+contention (browsers, GPU, heavy compile), not observation: a curl-and-SQL
+service harness can observe mid-wave freely.
+
+**The user will interject mid-wave — it is the normal case, not the exception.**
+The recorded run's most frequent collision channel was not builder-vs-builder;
+it was the orchestrator itself servicing user requests (screenshots, a deploy,
+a README) while a wave ran — including editing a live builder's file and, twice,
+the wave script itself, which invalidated the resume cache and re-bought a
+round. The rule: user work mid-wave touches only files no piece owns; if it
+needs owned files, TaskStop the run, do the work, resume with the same args —
+completed agents come back from cache. The recorded run improvised exactly this
+on day five, successfully.
 
 **Never kill on a pattern that matches the tooling the agents run.** The
 orchestrator and the agents share the capture command; a `pkill` on it takes out
@@ -174,9 +197,14 @@ genuinely transient. Commit what is ready elsewhere and wait.
 a. Run the gates, weakest-first, and fix anything broken.
 b. Capture the full review sheet and LOOK at it yourself.
 c. Update the ledger with the REAL verdicts — the critic's own words.
-d. Commit, push, PR, merge, resync local to the merged main.
+d. Commit, push, PR, merge — in the same tick — resync local to the merged main.
 e. Launch the next thing.
 ```
+
+**(d) means merged before the tick ends.** In this system a PR is a changelog
+entry, not a review gate — nobody is coming. The recorded run's first PR sat
+open for 27 hours and a full day of ticks was structured around watching it;
+every later PR merged within seconds and the loop ran better for it.
 
 **(b) is not optional.** The builder's summary is the most persuasive and least
 reliable artifact in the system, and the orchestrator is the last place a human

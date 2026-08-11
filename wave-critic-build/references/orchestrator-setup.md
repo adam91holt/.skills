@@ -45,6 +45,8 @@ not idle politely — it builds, and you throw the work away.
 | 4 | One wave launched **by hand** and landed | You need to have watched it once |
 | 5 | Gate commands that run clean on a fresh clone | Typecheck, smoke, capture |
 | 6 | A ledger file the loop can write | `tools/progress.state.json` or equivalent |
+| 7 | The Workflow tool exists in the session that will run the loop | Deployment-specific — check the tool list. Without it, fall back to Agent-tool fan-out: no resume cache, no journal; liveness and carry are all manual |
+| 8 | Hooks audited | A Stop hook that force-commits will snapshot live builders' half-written files — the recorded run did this five times. Scope it out for the repo, or bind the tick rule: hook-forced commits typecheck first and never include files a live agent owns |
 
 **Number 4 is not optional.** The orchestrator's whole job is judging whether a
 wave is alive, resuming it, and landing it. You cannot write that procedure for a
@@ -111,10 +113,17 @@ So for a project at `/home/user/atlas`, `WFDIR` ends up as
 Derive it, then **verify it is the live one**:
 
 ```bash
-SLUG=$(pwd | sed 's|/|-|g')
+SLUG=$(pwd | sed 's|[^A-Za-z0-9]|-|g')
 WFDIR=$(ls -dt ~/.claude/projects/$SLUG/*/subagents/workflows 2>/dev/null | head -1)
 ls -t "$WFDIR" | head -3          # should show wf_* run dirs, newest first
 ```
+
+The character class matters: Claude Code replaces **every non-alphanumeric
+character** with `-`, not just `/`. A repo path containing a dot — `.skills`,
+`my.app` — breaks the naive `/`-only sed (`/home/user/.skills` slugs to
+`-home-user--skills`, not `-home-user-.skills`), the glob matches nothing, and
+the tick reads "no runs found". Confirm the derived path against the directory
+the Workflow tool result reported before trusting it.
 
 ### The trap: WFDIR contains a session id
 
@@ -163,8 +172,10 @@ differently:
 - **A local machine** (Claude Code CLI on hardware you own): the session
   process stays alive as long as the machine does. `/loop 1h <pointer>` or an
   in-session cron is fine here, and simpler — the in-session mechanisms only
-  die if you close the terminal or the machine sleeps. If the box may sleep or
-  you may close the lid, fall through to the remote rules.
+  die if the session does. Be honest about how often that is: closed terminals,
+  dropped SSH/tmux connections, and a laptop lid all behave exactly like a
+  remote suspend. A desktop that never sleeps qualifies; anything else, fall
+  through to the remote rules.
 - **A remote / managed environment** (Claude Code on the web, CCR, Cowork
   cloud): the container suspends without warning — every 35–90 minutes in the
   recorded run — and takes every in-session mechanism with it. Here the rule
@@ -174,16 +185,22 @@ differently:
 
 The remote case is the most expensive lesson in the recorded run, and it dwarfs
 every wave stall: the loop went silent for **67.5 hours**, bridged only by the
-human asking "is it definitely still running?". The chain: an hourly
-`send_later` re-arm worked seven times, then one re-arm call failed (the MCP
-tool's name had changed mid-session) and the chain was dead. The fallback was
-the harness cron — whose own tool result says *"Session-only (not written to
+human asking "is it definitely still running?". Read the chain precisely,
+because the killer is not where it looks: an hourly `send_later` re-arm worked
+seven times, then one re-arm call failed **loudly** (the MCP server had
+dropped; its tools vanished) and the session diagnosed it within seconds. The
+fatal move was the *replacement*: it fell back to the harness cron — accepting
+a tool result that told it, in so many words, *"Session-only (not written to
 disk, dies when Claude exits)"* — and the container suspended, taking the cron
-with it. So did the 12-minute liveness cron: *"it's in-memory, so it can't
-survive the thing it exists to detect."* What fixed it, permanently, was a
+with it. The cron was re-created three times over two days and **never fired
+once**. So the rule is not just "re-arm chains are fragile" (their pending
+reminder does survive suspends — the per-tick re-arm is the single point of
+failure); it is: **when a scheduling call fails, the replacement must be MORE
+durable than what died, and any mechanism whose own description says
+"session-only" is disqualified.** What fixed it, permanently, was a
 **server-side Routine**: *"Routines are server-side — they survive suspension
 and wake the session, unlike the in-memory cron. That's the actual fix."* It
-then fired hourly without a miss for the rest of the build.
+then fired hourly without a miss for the rest of the build (54 for 54).
 
 Durability hierarchy, most durable first:
 
@@ -191,18 +208,28 @@ Durability hierarchy, most durable first:
 |---|---|---|---|
 | **Server-side Routine** (`create_trigger`, claude-code-remote MCP) bound to the persistent session | Same session, full history | **Yes — fires server-side and revives the container** | **The default for anything unattended in a remote environment** |
 | Server-side Routine, fresh session per fire | None — each tick starts cold | Yes | Works; every tick pays the cold-start, and resume is unavailable (see below) |
-| `send_later` re-arm chain | Same session | The *pending* one survives — but every tick must successfully re-arm, and one failed call kills the loop silently | Acceptable short-term; know its failure mode |
+| `send_later` re-arm chain | Same session | The *pending* one survives — but every tick must successfully re-arm, and after one failed re-arm nothing ever fires again | Acceptable short-term; know its failure mode |
 | In-session cron (`CronCreate`) or `/loop 1h <pointer>` | Same session | **No — in-memory, dies with the container** | **Local machines**, or supervised same-day remote work |
 | System cron → CLI headless | Fresh session each tick | Yes | You own the box and want it outside the app |
 
 Hourly is the right default (for Routines it is also the minimum interval). It
 is long enough that a wave makes real progress between ticks and short enough
-that a dead wave costs one hour, not a night.
+that a dead wave costs one hour, not a night. Note what the hourly floor
+implies: in a remote environment there is **no durable sub-hourly watchdog** —
+the recorded run wanted a 12-minute liveness check and no mechanism could
+provide one that survived a suspend. Detection latency for a dead wave is
+bounded below by the tick interval; design for that with short waves and
+resume, rather than pretending a faster check exists.
 
 > Whichever you pick, **write the prompt for the fresh-session case.** Even a
-> persistent session loses its history to context compaction — the recorded run
-> hit that on day four — and a prompt that quietly depends on continuity fails
-> in the one scenario it exists to handle.
+> persistent session loses its history to context compaction — on a multi-day
+> loop this is inevitable, not an edge case; the recorded run compacted after
+> four days — and a prompt that quietly depends on continuity fails in the one
+> scenario it exists to handle. Treat the first post-compaction tick as a fresh
+> session with extra teeth: MCP tool names may have changed prefix (re-discover
+> them with ToolSearch) and any remembered path, WFDIR included, may be wrong
+> (re-resolve by glob). Both bit the recorded run within minutes of its
+> compaction.
 
 Two corollaries. The loop must be idempotent per tick: two ticks firing against
 the same state — which happens after a restart — must not produce two waves;

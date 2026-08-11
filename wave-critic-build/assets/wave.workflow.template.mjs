@@ -16,14 +16,18 @@
  *     }
  *   })
  *
- * Pass `args` as a REAL JSON OBJECT, never a JSON-encoded string. The harness
- * warns about this and the recorded run proves why: every launch passed a
- * string, `args.pieces` read undefined against the original script, and carry
- * never reached a single builder for three days. The parser below defends
- * against the string shape, but defence is not an invitation.
+ * The harness asks for `args` as a real JSON value; this script also accepts
+ * the JSON-string shape defensively (every launch in the recorded run arrived
+ * stringified) and THROWS on anything else. The three-day carry-starvation bug
+ * was a script that read a stringified args without parsing it — `args.pieces`
+ * came back undefined and the script fell through to defaults, silently.
  *
- * RESUME: pass the SAME args object byte-for-byte with resumeFromRunId. Finished
- * agents replay from cache; only the killed ones re-run. Two constraints:
+ * RESUME: relaunch with resumeFromRunId and the EXACT args value the run was
+ * launched with, verbatim — record it at launch. The replay cache is keyed per
+ * agent() call on (prompt, opts); identical args into an unedited,
+ * manifest-driven script keep every completed call's prompt identical, which
+ * is what makes the cache hit. Finished agents replay from cache; only the
+ * killed ones re-run. Two constraints:
  *   - Resume only works from the SESSION that launched the run. A replaced
  *     session goes straight to journal-rescue + fresh launch with carry.
  *   - The manifest is read by an agent() call, so a resume REPLAYS the cached
@@ -284,12 +288,23 @@ const selected = ids.map((id) => byId.get(id));
 log(`Wave: ${ids.join(', ')} — up to ${MAX_ROUNDS} rounds each, pass at ${PASS_SCORE}.`);
 for (const id of Object.keys(CARRY)) log(`  carrying forward a prior verdict for ${id}`);
 
-// pipeline, not parallel: piece A may be in round 3 while piece B is in round 1.
-// A barrier between build and judge would waste the fast piece's wall clock.
+// One self-contained stage per piece: each piece runs its own build→judge
+// rounds independently, so piece A can be in round 3 while B is in round 1.
+// (With a single stage, pipeline() and parallel() behave the same here — both
+// run items concurrently, and both resolve a throwing item to null, which is
+// why `dropped` is computed loudly below.) Concurrency equals pieces in
+// flight, so bound it by passing few pieces per wave: the harness's own cap
+// is sized for CPU threads, not for capture-heavy work like headless browsers.
 const results = await pipeline(selected, async (piece) => {
   let verdict = CARRY[piece.id] || null;
   let round = 0;
   const history = [];
+  // Seed the plateau history with the carried verdict as round 0, so round 1
+  // of THIS wave is a real cross-wave plateau check — without this, a piece
+  // that plateaued across waves buys two fresh rounds before anyone notices.
+  if (verdict?.score != null) {
+    history.push({ round: 0, score: verdict.score, blindPick: verdict.blindPick, gap: verdict.biggestGap });
+  }
 
   while (round < MAX_ROUNDS) {
     round++;
@@ -338,20 +353,38 @@ const results = await pipeline(selected, async (piece) => {
 });
 
 const done = results.filter(Boolean);
-log(`Wave complete: ${done.filter((r) => r.passed).length}/${done.length} passed.`);
+
+// pipeline() resolves a throwing item to null — silently. A dropped piece must
+// be the loudest line in the result, never a shrunken denominator.
+const dropped = selected.map((p) => p.id).filter((id) => !done.some((r) => r.piece === id));
+if (dropped.length) {
+  log(
+    `WARNING: ${dropped.length} piece(s) DROPPED mid-wave (a stage threw): ${dropped.join(', ')} — ` +
+      `read the journal and the agent transcripts before trusting anything else in this result.`,
+  );
+}
+
+log(`Wave complete: ${done.filter((r) => r.passed).length}/${selected.length} passed${dropped.length ? `, ${dropped.length} DROPPED` : ''}.`);
 
 return {
   passed: done.filter((r) => r.passed).map((r) => r.piece),
   plateaued: done.filter((r) => r.plateaued).map((r) => r.piece),
-  // Feed `outstanding` straight back in as the next run's `carry`.
-  outstanding: done
-    .filter((r) => !r.passed)
-    .map((r) => ({
-      piece: r.piece,
-      score: r.verdict?.score,
-      gap: r.verdict?.biggestGap,
-      directive: r.verdict?.directive,
-      evidence: r.verdict?.evidence,
-    })),
+  dropped,
+  // Keyed by piece id, with exactly the fields the builder prompt reads —
+  // feed `outstanding` straight back in as the next run's `carry`, unchanged.
+  outstanding: Object.fromEntries(
+    done
+      .filter((r) => !r.passed && r.verdict)
+      .map((r) => [
+        r.piece,
+        {
+          score: r.verdict.score,
+          blindPick: r.verdict.blindPick,
+          biggestGap: r.verdict.biggestGap,
+          directive: r.verdict.directive,
+          evidence: r.verdict.evidence,
+        },
+      ]),
+  ),
   detail: done,
 };

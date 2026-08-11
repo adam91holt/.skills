@@ -4,10 +4,12 @@ Fill the `<ANGLE_BRACKETS>` from the interview. Keep the paragraph order — it 
 *what* → *how it's split* → *how it's judged* → *when it ends* → *how it's kept
 whole* → *how I watch it* → *triggers*, and each paragraph assumes the one before.
 
-Aim for **250–450 words**. Long enough to carry every clause, short enough that
-nothing gets skimmed. The original was 257; the three clauses this template adds
-that it lacked — Phase 0, explicit ownership, the reporting rule — take a filled
-template to roughly 370–440.
+Aim for **250–500 words**. Long enough to carry every clause, short enough that
+nothing gets skimmed. The original was 257; the clauses this template adds that
+it lacked — Phase 0, explicit ownership, the reporting rule, and (for
+unattended runs) the scheduler paragraph — take a filled template to roughly
+370–490. The scheduler paragraph earns its ~70 words: the original run lost
+67.5 hours to a scheduler that died with its container.
 
 Write it in the **user's voice**: first person, imperative, addressed to Claude.
 
@@ -43,6 +45,16 @@ measurement I could check myself, and sends the builder back in to close exactly
 that.
 
 <TERMINATION CLAUSE — pick one from below>
+
+<UNATTENDED ONLY — include this paragraph when Q2 said unattended; drop it for
+supervised runs:>
+Run the loop from a scheduler that survives restarts — in a remote environment
+that means a server-side Routine that fires hourly and can wake a suspended
+container, never an in-session timer, which dies with the container. Every
+tick, prove the wave is actually alive from the age of the main agent process
+before doing anything else — files existing proves nothing — and resume dead
+runs instead of relaunching them so finished work comes back from cache. If I
+ask whether it's running, check first, then answer.
 
 Between major waves, spawn one fresh agent to <USE THE WHOLE THING END TO END>
 and smooth everything into one coherent thing. It owns the whole repo, it can

@@ -11,15 +11,18 @@ is how you will meet them.
 ## "It's been quiet for a while"
 
 ### The loop stopped ticking entirely
-**Cause.** The scheduler lived inside the session. An in-memory cron
-(`CronCreate`) dies with the container — as does a `/loop`. A `send_later`
-re-arm chain dies the first time one re-arm call fails; in the recorded run the
-MCP tool's name changed mid-session and the chain was dead. The 12-minute
-liveness cron died the same way: it cannot survive the thing it exists to
-detect.
+**Cause.** The scheduler ended up living inside the session. The recorded
+sequence: a `send_later` re-arm call failed **loudly** (the MCP server had
+dropped) — that part was diagnosed in seconds — and the fatal move was the
+fallback: an in-memory cron (`CronCreate`) accepted despite its own tool result
+saying *"Session-only… dies when Claude exits"*. The container suspended; the
+cron — re-created three times — never fired once. A `/loop` dies the same way,
+and so did the 12-minute liveness cron: it cannot survive the thing it exists
+to detect.
 **Fix.** A **server-side Routine** (`create_trigger`) bound to the persistent
-session — it fires server-side and revives a suspended container. The scheduler
-must live outside the thing it schedules.
+session — it fires server-side and revives a suspended container. And the
+meta-rule: when a scheduling call fails, the replacement must be *more* durable
+than what died; anything self-described as "session-only" is disqualified.
 **Cost when it bites:** 67.5 hours of silence in the recorded run, bridged only
 by the human asking "is it definitely still running?".
 
@@ -84,9 +87,11 @@ not coming back, and the resumed agent restarts that step from scratch.
 
 ### Two waves running at once
 **Cause.** `WFDIR` was pinned in the tick prompt, but the path embeds a session
-id. The orchestrator session restarted, the pinned path went stale, the tick found
-no runs and launched a second wave alongside the one still building. The stale path
-goes bad at precisely the moment the check exists to catch.
+id. The loop's session was **replaced** (a persistent session keeps its id
+across container restarts — replacement is the trigger, not restart), the
+pinned path went stale, the tick found no runs and launched a second wave
+alongside the one still building. The stale path goes bad at precisely the
+moment the check exists to catch.
 **Fix.** Resolve `WFDIR` by glob every tick, and sanity-check the newest run's
 mtime against `date -u` — a newest run that is days old means the glob found a
 dead session directory, not that the wave is dead.
@@ -120,7 +125,9 @@ the prompt every time.
 ### Confident nonsense in a verdict
 **Cause.** Captures taken while other agents were contending for cores. Contended
 frames are false evidence, which is worse than no evidence.
-**Fix.** Never capture during a wave. Bound concurrency to cores, not ambition.
+**Fix.** Never capture during a wave **on a harness that contends for the
+machine** (headless browsers, GPU, heavy compile — a curl-and-SQL harness can
+observe mid-wave freely). Bound concurrency to cores, not ambition.
 
 ### A defect survives every automated check for weeks
 **Cause.** The harness bypasses the layer the defect lives in. A `setInput()` that
@@ -206,6 +213,24 @@ asked for, the build is finished — say so and stop.*
 ---
 
 ## Process hygiene
+
+### The first tick after a context compaction goes sideways
+**Cause.** On a multi-day persistent session, compaction is inevitable (the
+recorded run compacted after four days). Afterwards, MCP tool names may carry a
+different prefix and any remembered path — WFDIR included — may be wrong; the
+recorded run hit both within minutes.
+**Fix.** Treat the first post-compaction tick as a fresh session: re-resolve
+WFDIR by glob, re-discover MCP tools with ToolSearch, and trust only what the
+tick prompt says, not what the session "remembers".
+
+### A Stop hook commits half-written files mid-wave
+**Cause.** A user-level Stop hook ("there are uncommitted changes — commit and
+push") fires whenever the orchestrator finishes a reply, including while
+builders are mid-flight. The recorded run committed live builders' half-written
+modules five separate times this way.
+**Fix.** Audit hooks before the first tick. Scope commit-forcing hooks out of
+the build repo, or bind the tick rule: a hook-forced commit runs the typecheck
+first and never includes files a live agent owns.
 
 ### `pkill` takes out the live wave
 **Cause.** The orchestrator and the agents run the same capture command.

@@ -27,7 +27,7 @@ tick needs that the last session merely *remembered* belongs in this file.
 WFDIR resolves per tick — do not pin it (the path embeds a session id and goes
 stale on exactly the restart you need to detect):
   <the resolve command for your harness, e.g.
-   SLUG=$(pwd | sed 's|/|-|g')
+   SLUG=$(pwd | sed 's|[^A-Za-z0-9]|-|g')   # EVERY non-alphanumeric becomes "-", not just "/"
    WFDIR=$(ls -dt ~/.claude/projects/$SLUG/*/subagents/workflows | head -1)>
 Sanity-check it: newest run in $WFDIR against `date -u`. A newest run that is days
 old means the glob found a dead session dir, NOT that the wave is dead.
@@ -67,10 +67,12 @@ Concurrency is <N> on this <M>-core box.
 STEP 2 — If DEAD: RESUME, DO NOT RELAUNCH.
   Workflow({scriptPath:"<script>", resumeFromRunId:"<the dead RUN>", args:<the SAME args object, byte-for-byte>})
 Completed agent calls return from cache instantly and only the killed agents
-re-run, carry intact. Args must match exactly or the cache misses and you buy the
-whole wave again. Pass args as a REAL JSON OBJECT, never a JSON-encoded string —
-a stringified args once meant carry never reached a single builder for three
-days while every wave reported itself healthy.
+re-run, carry intact. Re-pass the EXACT args value the run was launched with,
+verbatim — the cache is keyed on each agent call's prompt, and identical args
+into an unedited script are what keep those prompts identical. (The script
+parses object or JSON-string args and throws on anything else; the historical
+three-day carry starvation came from a script that read a stringified args
+without parsing it.)
 RESUME IS SAME-SESSION ONLY. If this tick is not running in the session that
 launched the dead run (fresh-session Routine, replaced session), do not try it:
 go straight to the journal-rescue below and relaunch fresh with the earned
@@ -86,15 +88,27 @@ committing something that cannot build.
 Relaunch fresh ONLY if resume errors, and then pass the earned verdicts as carry.
 AFTER ANY LAUNCH OR RESUME, VERIFY BEFORE WALKING AWAY: grep 'YOUR PIECE' and
 'Observed:' out of each new agent transcript. The first confirms the piece
-arrived, the second confirms the carry arrived. A carry bug once dropped two of
-three pieces to null silently while the wave reported itself started.
+arrived, the second confirms the carry arrived (an 'Observed: undefined' means
+it did not). A carry bug once dropped two of three pieces to null silently
+while the wave reported itself started.
+IF VERIFICATION FAILS: stop the run by its task id (TaskStop), fix the args or
+carry, relaunch with the same carry. Never pkill — the agents share your
+tooling's process names.
 
 STEP 3 — If ALIVE: run the gates. If clean, commit and push, and do nothing else.
 If a gate fails ONLY inside a file an agent is mid-write on, that is transient —
-commit anything under tools/ that is ready and wait. Do NOT run captures while
-agents are active (the cores cannot serve three headless browsers, and the output
-is false evidence), and never `pkill` on any pattern matching the capture command
-— the agents run that same command.
+commit anything under tools/ that is ready and wait. On a harness that contends
+for the machine (headless browsers, GPU, heavy compile), do NOT run captures
+while agents are active — the output is false evidence; a curl-and-SQL harness
+may observe mid-wave freely. Never `pkill` on any pattern matching the capture
+command — the agents run that same command.
+
+If I ask for something while a wave or pass is in flight: touch only files no
+piece owns. If the request needs owned files, TaskStop the run, do the work,
+then RESUME it — same session, same args; completed agents come back from
+cache. That is cheaper than fighting a builder for its files.
+If a Stop hook forces a commit while a wave is alive: run the typecheck first,
+and never commit files a live agent owns.
 
 STEP 4 — If FINISHED:
   a. Run the gates weakest-first, and fix anything broken. Typecheck-clean has
@@ -102,9 +116,14 @@ STEP 4 — If FINISHED:
   b. Capture the full review sheet and LOOK at the output with the Read tool.
      Never trust an agent's summary.
   c. Update the ledger with the REAL verdicts — the critic's own measured words,
-     not a paraphrase — then re-render the board.
-  d. Commit, push, open a PR, merge it, then resync local to the merged main.
-     Merge every wave.
+     not a paraphrase — then re-render the board. The board's artifact URL is
+     <url> — republish WITH that url parameter; publishing by file path alone
+     from a replaced session mints a new link and strands the human's bookmark.
+  d. Commit, push, open a PR, and MERGE IT IN THE SAME TICK, then resync local
+     to the merged main. Nobody is coming to review — an open PR here is not
+     "awaiting review", it is a stalled loop (the recorded run's first PR sat
+     open 27 hours and warped a whole day of ticks around watching it). Merge
+     every wave.
   e. Launch the next thing, in this order:
        - any piece whose blocker has just landed, carrying its prior verdict
        - the COHERENCE PASS if pieces have merged since the last one. It must run
@@ -152,9 +171,12 @@ decision, or the build is finished.
 
 | Rule | The failure it prevents |
 |---|---|
-| Args as a real object, never a string | A stringified args starved every builder of carry for three days, silently |
+| Args re-passed verbatim on resume | The cache is per agent call (prompt + opts): identical args to an unedited script keep prompts identical; an unparsed stringified args once starved every builder of carry for three days |
 | Resume is same-session only | A replaced session burns its tick on a resume that can only error |
 | Status questions run STEP 1 first | The loop told its human "running" twice over a 10-hour corpse |
+| TaskStop → fix → relaunch when verification fails | The recorded run caught a carry TypeError 40 seconds after launch and saved the wave this way |
+| Mid-wave user requests: unowned files only, or TaskStop-work-resume | The orchestrator edited a live builder's file and a live wave's script; the second invalidated the resume cache and re-bought a round |
+| Merge in the same tick | The first PR sat open 27 hours; a day of ticks was structured around watching it |
 | Resolve the run id, never trust the prompt | The prompt is stale the moment a wave relaunches |
 | `ls -t`, not `ls \| tail` | Alphabetical sort hid the only live agent behind eleven finished ones |
 | Liveness by **process age** | Files and browsers outlive the agents that made them — 11.5h stall |

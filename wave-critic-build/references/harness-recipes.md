@@ -18,10 +18,11 @@ Plus one rule that is easy to skip and expensive to skip:
 > **Your harness will hide the class of bug that lives in the layer it replaces.**
 > At least one instrument must drive the product the way a real user does.
 
-In the case study, steering was mirrored for weeks because `setInput()` wrote the
-virtual input and short-circuited the exact device path that was broken. The fix
-was a probe that dispatches **real key events** and measures which way the vehicle
-actually went. See `worked-example.md`.
+In the case study, steering was mirrored for the first five days because
+`setInput()` wrote the virtual input and short-circuited the exact device path
+that was broken — it was caught by the user playing the deployed build, not by
+any check. The verifying fix was a probe that dispatches **real key events** and
+measures which way the vehicle actually went. See `worked-example.md`.
 
 ---
 

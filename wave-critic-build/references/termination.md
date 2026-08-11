@@ -42,7 +42,12 @@ evaluating the work — than one that says *passed*. It also means resuming late
 cheap: the next wave starts from a measured directive rather than a rediscovery.
 
 The wave template implements `(b)` directly: two rounds of movement under half a
-point returns `plateaued: true` instead of buying another round.
+point returns `plateaued: true` instead of buying another round — and it seeds a
+carried verdict's score into the history as round 0, so the first round of a new
+wave is a real *cross-wave* plateau check rather than needing two fresh rounds.
+Cross-wave regressions (a piece scoring below its carried score, which the
+recorded run saw) still belong to the ledger: compare each wave's scores against
+the carried ones when updating it.
 
 ---
 
