@@ -7,6 +7,17 @@ loop alive across an infrastructure that will kill it.
 The tick prompt itself is `assets/orchestrator.prompt.md`. This file explains why
 each rule is there, so you can adapt rather than copy blindly.
 
+- **Standing one up for the first time** — prerequisites, locating `WFDIR`,
+  choosing how it wakes, the bootstrap tick: `orchestrator-setup.md`.
+- **What a live one looks like** on day four, every slot filled:
+  `assets/orchestrator.example.md`.
+
+One idea underpins the whole design and is worth holding while you read the rest:
+**the tick prompt is the loop's only memory.** Waves die, sessions are replaced,
+containers restart. The repo and the prompt survive. So the prompt carries its
+state inline — current run, queue, standing gaps, parked decisions — and is
+written to be correct when fired into a session that has never seen the project.
+
 ---
 
 ## The shape
@@ -152,6 +163,48 @@ queued pieces. And the coherence pass runs **alone**.
 Keep a running list in the tick prompt of **standing gaps no single piece owns**,
 and carry it forward across ticks. That list is the coherence pass's backlog, and
 nothing else in the system remembers it.
+
+---
+
+## Two things the board will not tell you
+
+Both belong in the tick prompt, and both are invisible to a green ledger.
+
+### Unjudged surfaces
+
+A surface that shipped without ever facing a critic — the mobile build, the
+screen-reader path, the cold start, the error states. These pass every gate, for a
+reason that is structural rather than accidental:
+
+> **The gates only drive the surface the harness drives.**
+
+So a touch layer that shipped straight to main off a bug report can sit there for
+weeks, typechecking, smoke-testing, and captured in no frame anyone looked at.
+The ledger says nothing because it has no row for it.
+
+List them explicitly. When the board is otherwise green, each is owed a round with
+its own brief and its own benchmark — *thumbs on glass, one-handed, against the
+benchmark's phone app* is a different critic from the one that judged the desktop
+view, and it needs to be told so.
+
+### Parked work
+
+The user raises something, thinks better of it, and says *park that*. Write it
+into the prompt in a block of its own, immediately. Three failures otherwise:
+
+| Failure | What it looks like |
+|---|---|
+| The loop **starts it** | It folded the idea into its definition of done and picked it up when the board went green |
+| The loop **raises it every tick** | Which trains its human to stop reading the messages |
+| The analysis is **re-derived** | Parked work is usually parked *after* someone found out it was harder than it looked; that hour gets paid twice |
+
+The block needs three parts: the verdict **with the user's own words quoted**, the
+scope stated as negatives (not triggered by, not part of done, not to be raised —
+plus an explicit *the build can finish without this*), and the reference notes
+**labelled as reference, not instructions**. That last label is load-bearing: an
+unlabelled list of findings under a heading reads as a checklist.
+
+Full template and the reasoning: `orchestrator-setup.md`.
 
 ---
 

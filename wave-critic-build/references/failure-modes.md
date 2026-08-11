@@ -28,6 +28,12 @@ agent behind eleven finished ones.
 outranks it.
 **Fix.** `ps -eo etime,comm | grep -w <agent>`, unsorted and unfiltered.
 
+### The liveness command errors and the tick carries on regardless
+**Cause.** GNU flags on a BSD box — `ls --time-style` does not exist on macOS.
+An agent reads a failed check as *no evidence of death*.
+**Fix.** Fix the portability when you write the prompt, and make a check that
+cannot run fail loudly rather than fall through. See `orchestrator-setup.md`.
+
 ---
 
 ## "It ran, but it built the wrong thing"
@@ -55,6 +61,15 @@ manifest-driven so it is never edited between waves.
 **Cause.** A dead agent was mid-write on a file. That is *not* transient — it is
 not coming back, and the resumed agent restarts that step from scratch.
 **Fix.** `git checkout --` the half-written files before resuming.
+
+### Two waves running at once
+**Cause.** `WFDIR` was pinned in the tick prompt, but the path embeds a session
+id. The orchestrator session restarted, the pinned path went stale, the tick found
+no runs and launched a second wave alongside the one still building. The stale path
+goes bad at precisely the moment the check exists to catch.
+**Fix.** Resolve `WFDIR` by glob every tick, and sanity-check the newest run's
+mtime against `date -u` — a newest run that is days old means the glob found a
+dead session directory, not that the wave is dead.
 
 ---
 
@@ -98,6 +113,15 @@ convention and the keyboard mapping had been written to match the comment.
 ### The probe stops measuring the thing it measures
 **Cause.** Calling the harness's step/render latched the product into a bench mode.
 **Fix.** Write "this probe only reads" at the top of the probe, and mean it.
+
+### An entire surface reaches "done" having never been judged
+**Cause.** The gates only drive the surface *the harness drives*. A touch layer, a
+screen-reader path or a cold-start route shipped straight to main passes typecheck,
+smoke and capture indefinitely, because no captured state and no ledger row has
+ever pointed at it.
+**Fix.** Keep a standing list of unjudged surfaces in the tick prompt, and give
+each one a round of its own — its own brief, its own benchmark, its own critic —
+before the board is allowed to read as green.
 
 ---
 
@@ -144,6 +168,20 @@ another variation on the same inadequate move.
 ### The builder redesigns every round
 **Cause.** The carry did not say not to.
 **Fix.** *"Close that gap first. Do not start a redesign."*
+
+### Work the user parked gets started anyway
+**Cause.** The loop had folded it into its definition of done, so the board going
+green read as the trigger. Or the parked item's research notes sat under a heading
+with no label, and a list of findings reads as a checklist.
+**Fix.** A parked block that quotes the user, states the scope as negatives, says
+explicitly that the build can finish without it, and labels the notes *reference,
+not instructions to act on*. See `orchestrator-setup.md`.
+
+### The board is green and the loop will not call it finished
+**Cause.** A termination policy plus one permanently-open item it can never close —
+usually something parked, which by definition will not close until the user asks.
+**Fix.** Say it in the prompt: *if the board goes fully green and this has not been
+asked for, the build is finished — say so and stop.*
 
 ---
 

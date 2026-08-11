@@ -269,7 +269,9 @@ Detail and full prompts: `references/coherence-pass.md`.
 ## Phase 4 — The orchestrator loop
 
 A persistent session woken on a schedule (hourly works well), running a
-**procedure, not a request**. Copy `assets/orchestrator.prompt.md`.
+**procedure, not a request**. Copy `assets/orchestrator.prompt.md`; follow
+`references/orchestrator-setup.md` to stand it up; read
+`assets/orchestrator.example.md` to see a populated one.
 
 ```
 STEP 0 — publish the session archive
@@ -278,6 +280,19 @@ STEP 2 — if DEAD: RESUME, do not relaunch
 STEP 3 — if ALIVE: run the gates, commit, push, do nothing else
 STEP 4 — if FINISHED: verify → look → update the ledger → merge → launch the next
 ```
+
+Setting it up is mostly one decision, and it explains the odd shape of a real tick
+prompt:
+
+> **The tick prompt is the loop's only memory.**
+
+Waves die, sessions get replaced, the container restarts. The repo and the prompt
+are what survive. So write it to be correct when fired into **a session that has
+never seen the project** — which means the current run, the queue, the standing
+gaps and any parked decisions all live inline, and anything derived from a session
+id (the workflow run directory included) is *resolved each tick*, never pinned.
+Put it in the repo as `tools/tick.prompt.md` and let the loop amend it; a prompt
+pasted into a scheduler is frozen, a prompt in the repo learns.
 
 Three things carry most of the value:
 
@@ -308,6 +323,24 @@ bug can drop two of three pieces while the wave cheerfully reports itself starte
 
 State the order explicitly in every prompt, because agents reliably stop at the
 cheapest green light. **A typecheck has passed on a build that did not boot.**
+
+### Two things a green board will not tell you
+
+Keep both as standing sections of the tick prompt.
+
+**Unjudged surfaces.** The gates only drive the surface *the harness drives* — so
+the mobile build, the screen-reader path, the cold start and the error states can
+pass everything for weeks without a critic ever opening them. Name them, and give
+each its own round, with its own brief and benchmark, once the board is otherwise
+green.
+
+**Parked work.** When the user parks something, write it into the prompt in a
+block of its own: the decision **with their own words quoted**, the scope stated
+as negatives (not triggered by the board going green, not part of done, not to be
+raised again — and the build *can* finish without it), and the analysis already
+done, explicitly **labelled reference, not instructions**. Skip the block and the
+loop either starts it, raises it every tick, or re-derives the work from scratch
+when the user finally asks.
 
 ---
 
@@ -356,6 +389,9 @@ the most:
 | Good parts, incoherent whole | No coherence pass | Run one between every wave |
 | A defect reported by five critics, fixed by none | It lives between owners | Coherence pass owns it |
 | Confident nonsense in a verdict | Captures taken while other agents contended for cores | Never capture during a wave |
+| Two waves running at once | `WFDIR` pinned; it embeds a session id and went stale on a restart | Resolve it by glob every tick |
+| A whole surface reaches "done" unjudged | The gates only drive the surface the harness drives | Keep a standing list of unjudged surfaces |
+| Parked work gets started anyway | No parked block, or its notes read as a checklist | Quote the user; label notes "reference, not instructions" |
 | The loop never ends | No termination policy | Phase 5 |
 
 ---
@@ -385,7 +421,8 @@ eight agents write in eight voices and every coherence round is spent on tone.
 | `references/harness-recipes.md` | Designing the harness for your project type |
 | `references/critic-protocol.md` | Writing the critic prompt, schema, calibration |
 | `references/coherence-pass.md` | Running the between-waves pass |
-| `references/orchestrator.md` | Standing up the scheduled loop; debugging a stall |
+| `references/orchestrator.md` | How the scheduled loop works; debugging a stall |
+| `references/orchestrator-setup.md` | Standing the loop up: WFDIR, scheduling, the bootstrap tick, parking work |
 | `references/termination.md` | Deciding when it's done; a piece has plateaued |
 | `references/failure-modes.md` | Before the first long run, and whenever something is odd |
 | `references/worked-example.md` | You want the receipts: a real 6-day run, with numbers |
@@ -394,6 +431,7 @@ eight agents write in eight voices and every coherence round is spent on tone.
 | `assets/wave.workflow.template.mjs` | Copy to `tools/`. No editing needed |
 | `assets/coherence.workflow.template.mjs` | Copy to `tools/`. No editing needed |
 | `assets/orchestrator.prompt.md` | Writing the scheduled tick prompt |
+| `assets/orchestrator.example.md` | A live tick prompt on day four, every slot filled |
 
 ---
 

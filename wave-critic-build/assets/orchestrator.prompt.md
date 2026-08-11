@@ -11,11 +11,26 @@ have decided you can afford the failure it prevents.
 Substitute `<ANGLE_BRACKETS>`. Keep the STEP numbering: agents follow numbered
 procedures far more reliably than prose.
 
+**How to stand it up** — locating `WFDIR`, choosing the wake mechanism, the
+bootstrap tick — is `references/orchestrator-setup.md`. For what this looks like
+once it has been running for days, with every slot filled, see
+`orchestrator.example.md`; the density there is the part a template cannot show.
+
+Remember what you are writing: **the tick prompt is the loop's only memory.** The
+session that runs the next tick may never have seen this project. Anything the
+tick needs that the last session merely *remembered* belongs in this file.
+
 ---
 
 ```
 <PROJECT> build loop — hourly. Repo <owner/repo>, branch <branch>.
-WFDIR=<absolute path to the workflow run directory>
+WFDIR resolves per tick — do not pin it (the path embeds a session id and goes
+stale on exactly the restart you need to detect):
+  <the resolve command for your harness, e.g.
+   SLUG=$(pwd | sed 's|/|-|g')
+   WFDIR=$(ls -dt ~/.claude/projects/$SLUG/*/subagents/workflows | head -1)>
+Sanity-check it: newest run in $WFDIR against `date -u`. A newest run that is days
+old means the glob found a dead session dir, NOT that the wave is dead.
 
 EVERY TICK, before anything else: `node tools/session.mjs`. It refreshes the
 conversation archive — the prompts that are building this product, which are
@@ -90,6 +105,24 @@ STEP 4 — If FINISHED:
        - the next queued pieces
   f. Standing gaps no single piece owns, for the next coherence pass:
        <list them here, and keep this list current across ticks>
+  g. Unjudged surfaces — shipped, passing every gate, never actually judged:
+       <the mobile build, the screen-reader path, the cold start, the error
+        states — whatever no critic has ever opened. They pass because the gates
+        drive the surface the harness drives. When the board is otherwise green,
+        each is owed a critic round with its own brief and its own benchmark.>
+
+<PARKED WORK — one block per item, or delete this section if there is none.>
+<THING> — PARKED. DO NOT START IT.
+The user raised it on <date> and then said, on the same day: "<their exact words>".
+So it is NOT triggered by the board going green, NOT part of the definition of
+done, and NOT something to raise again. It waits for the user to ask for it in
+their own words. Do not bring it up, do not start it early, do not fold pieces of
+it into other work. If the board goes fully green and this has not been asked for,
+the build is finished — say so and stop.
+The notes below exist only so the work is not re-derived when the user does ask.
+They are reference, not instructions to act on.
+  - <the real scope, the traps, the counts — what you already worked out>
+  - <the questions to put to the user at that time, not before>
 
 Keep waves SHORT (two pieces, two rounds) and rely on resume rather than on a
 wave surviving. Stop when every piece in the ledger is "pass" or has been
@@ -119,3 +152,8 @@ decision, or the build is finished.
 | Coherence runs alone | Whole-repo and strict ownership cannot both be true |
 | Look at the output yourself | The builder's summary is the most persuasive, least reliable artifact |
 | Plateau escalation | Otherwise the loop never terminates (see framework §9) |
+| Resolve `WFDIR`, never pin it | The path embeds a session id; a restart makes it stale and the tick launches a duplicate wave |
+| Name the unjudged surfaces | They pass every gate — the gates only drive the surface the harness drives |
+| Park work in a block, quoting the user | Otherwise it gets started when the board goes green, or raised every tick, or re-derived from scratch |
+| Label parked notes "reference, not instructions" | An unlabelled findings list reads as a checklist, and a loop with spare capacity works it |
+| "The build is finished — say so and stop" | A termination policy with one permanently-open item never terminates |
