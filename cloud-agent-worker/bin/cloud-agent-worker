@@ -1,0 +1,830 @@
+#!/usr/bin/env node
+/**
+ * Dispatch a cloud agent and wait for it.
+ *
+ * Claude Code, Cursor and Codex all run work somewhere else and take as long as they take.
+ * Started from a terminal that is the whole problem: you get an id and a URL, and then you
+ * are the one refreshing a browser tab. This does the waiting and exits when the agent is
+ * done, so a shell that blocks on it is a shell whose finishing means something.
+ *
+ * Standalone on purpose: Node's own fetch and child_process, no dependencies, no build. It
+ * reads the same credential files the three vendors' own tools write, so if you are signed
+ * in to them you are signed in to this.
+ */
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+
+const HOME = homedir();
+const FIRST_CHECK_MS = 20_000;
+const CHECK_EVERY_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 2 * 60 * 60_000;
+const MAX_SUMMARY = 4_000;
+
+/**
+ * What each provider runs unless told otherwise.
+ *
+ * Pinned rather than left to the account: a cloud agent inherits whatever that account's
+ * default happens to be that week, so an unpinned dispatch is a silent change of model
+ * between one run and the next.
+ */
+const DEFAULT_MODELS = {
+  claude: "opus",
+  cursor: "grok-4.6",
+  codex: "gpt-5.6-sol",
+};
+
+/**
+ * Reasoning effort, set high everywhere by default.
+ *
+ * Each vendor spells it differently — Claude a flag, Cursor a model parameter, Codex a
+ * config override — so the shared word is here and the spelling stays with the provider.
+ */
+const DEFAULT_EFFORT = "high";
+
+// ---------------------------------------------------------------- output
+
+/** Stdout is one JSON object, always. Progress goes to stderr so a pipe stays parseable. */
+const say = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+const note = (message) => process.stderr.write(`${message}\n`);
+
+function fail(error, hint) {
+  say({ ok: false, error, ...(hint ? { hint } : {}) });
+  process.exit(2);
+}
+
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+const ANSI = new RegExp("\\u001b\\[[0-9;?]*[A-Za-z]", "g");
+const stripAnsi = (text) => text.replace(ANSI, "");
+
+// ---------------------------------------------------------------- claude
+
+const claudeToken = () =>
+  readJson(join(HOME, ".claude", ".credentials.json"))?.claudeAiOauth?.accessToken;
+
+const claudeHeaders = (token) => ({
+  authorization: `Bearer ${token}`,
+  "anthropic-version": "2023-06-01",
+  "anthropic-beta": "oauth-2025-04-20",
+});
+
+/** review_ready is finished; need_input is waiting on a person; anything else is working. */
+function claudeState(session) {
+  const category = session?.external_metadata?.post_turn_summary?.status_category;
+  if (category === "review_ready") return "ready";
+  if (category === "need_input") return "needs_input";
+  if (category) return "working";
+  return session?.connection_status === "connected" ? "working" : "idle";
+}
+
+const parseClaudeSessionId = (text) =>
+  /claude\.ai\/code\/((?:session|cse)_[A-Za-z0-9]+)/.exec(stripAnsi(text))?.[1] ??
+  /(?:session|cse)_[A-Za-z0-9]{16,}/.exec(stripAnsi(text))?.[0];
+
+const claude = {
+  id: "claude",
+  label: "Claude Code",
+  needsCheckout: true,
+  available: () => existsSync(join(HOME, ".claude", ".credentials.json")),
+
+  async start({ task, cwd, model, effort }) {
+    if (!cwd) return { ok: false, error: "Claude starts from inside a checkout; pass --cwd" };
+    const modelId = model ?? DEFAULT_MODELS.claude;
+    const effortLevel = effort ?? DEFAULT_EFFORT;
+    // The CLI insists on a terminal, so `script` gives it one. The session keeps running in
+    // the cloud once this process is gone.
+    const command = [
+      "claude",
+      "--model",
+      shellQuote(modelId),
+      "--effort",
+      shellQuote(effortLevel),
+      "--cloud",
+      shellQuote(task),
+    ].join(" ");
+    const out = await run("script", ["-qec", command, "/dev/null"], {
+      cwd,
+      timeoutMs: 180_000,
+      stopWhen: (text) => Boolean(parseClaudeSessionId(text)),
+    });
+    const sessionId = parseClaudeSessionId(out);
+    if (!sessionId) return { ok: false, error: firstUsefulLine(out) || "no session id came back" };
+    return {
+      ok: true,
+      sessionId,
+      url: `https://claude.ai/code/${sessionId}`,
+      model: modelId,
+      effort: effortLevel,
+    };
+  },
+
+  async status(sessionId) {
+    const token = claudeToken();
+    if (!token) return { ok: false, error: "not signed in to claude.ai" };
+    const response = await fetch(`https://api.anthropic.com/v1/code/sessions/${sessionId}`, {
+      headers: claudeHeaders(token),
+    });
+    if (!response.ok) {
+      return { ok: false, error: `could not read the session (${response.status})` };
+    }
+    const body = await response.json();
+    const row = body.response_shape ?? body.data ?? body;
+    const meta = row.external_metadata ?? {};
+    const git = (row.config?.outcomes ?? []).find((outcome) => outcome.git_info)?.git_info;
+    return {
+      ok: true,
+      status: {
+        sessionId,
+        url: `https://claude.ai/code/${sessionId}`,
+        state: claudeState(row),
+        detail: meta.post_turn_summary?.status_detail || undefined,
+        repo: git?.repo,
+        branch: git?.branches?.[0] ?? Object.values(meta.current_branches ?? {})[0],
+        model: meta.last_served_model ?? row.config?.model,
+        costUsd: meta.usage?.cost_usd,
+      },
+    };
+  },
+
+  async summary(sessionId) {
+    const token = claudeToken();
+    if (!token) return undefined;
+    const response = await fetch(
+      `https://api.anthropic.com/v1/code/sessions/${sessionId}/events?limit=40`,
+      { headers: claudeHeaders(token) },
+    );
+    if (!response.ok) return undefined;
+    const events = (await response.json()).data ?? [];
+    for (const event of events) {
+      if (event.event_type === "result" && typeof event.payload?.result === "string") {
+        return event.payload.result.slice(0, MAX_SUMMARY);
+      }
+    }
+    for (const event of events) {
+      if (event.event_type !== "assistant") continue;
+      const text = (event.payload?.message?.content ?? [])
+        .map((part) => (part?.type === "text" ? String(part.text ?? "") : ""))
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+      if (text) return text.slice(0, MAX_SUMMARY);
+    }
+    return undefined;
+  },
+
+  async send(sessionId, message) {
+    const out = await run(
+      "claude",
+      ["-p", message, "--cloud", sessionId, "--output-format", "json"],
+      { timeoutMs: 120_000 },
+    );
+    const json = /\{[\s\S]*\}/.exec(stripAnsi(out));
+    if (json) {
+      try {
+        const body = JSON.parse(json[0]);
+        if (body.ok && body.session_id) return { ok: true, sessionId: body.session_id };
+        if (body.error) return { ok: false, error: body.error };
+      } catch {
+        // Not JSON after all; fall through to the text form.
+      }
+    }
+    return { ok: false, error: firstUsefulLine(out) || "the follow-up was not accepted" };
+  },
+};
+
+// ---------------------------------------------------------------- cursor
+
+const cursorToken = () => readJson(join(HOME, ".config", "cursor", "auth.json"))?.accessToken;
+
+/**
+ * Cursor's backend speaks Connect-RPC, which is proto3 JSON over an ordinary POST — so this
+ * needs no SDK, only the right field names. Numeric enums are used deliberately: they are
+ * stable on the wire.
+ */
+async function cursorCall(service, method, body) {
+  const token = cursorToken();
+  if (!token) return { ok: false, error: "not signed in to Cursor" };
+  try {
+    const response = await fetch(`https://api2.cursor.sh/aiserver.v1.${service}/${method}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        "connect-protocol-version": "1",
+      },
+      body: JSON.stringify(body),
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: `Cursor refused the call (${response.status}): ${cursorError(text)}`,
+      };
+    }
+    return { ok: true, body: text ? JSON.parse(text) : {} };
+  } catch (error) {
+    return { ok: false, error: error?.message ?? "could not reach Cursor" };
+  }
+}
+
+/**
+ * The sentence Cursor actually wrote. A Connect error puts a bare "Error" at the top level
+ * and the useful text — "The starting branch or commit ... does not exist" — several levels
+ * down, which is how a wrong branch looks like a broken integration.
+ */
+function cursorError(text) {
+  try {
+    const parsed = JSON.parse(text);
+    for (const entry of parsed.details ?? []) {
+      const detail = entry?.debug?.details;
+      if (detail?.detail) {
+        return detail.title ? `${detail.title} — ${detail.detail}` : detail.detail;
+      }
+    }
+    if (parsed.message && parsed.message !== "Error") return parsed.message;
+  } catch {
+    // Not JSON; fall through to the raw text.
+  }
+  return text.slice(0, 300) || "no message";
+}
+
+const CURSOR_STATES = {
+  BACKGROUND_COMPOSER_STATUS_FINISHED: "ready",
+  BACKGROUND_COMPOSER_STATUS_RUNNING: "working",
+  BACKGROUND_COMPOSER_STATUS_CREATING: "working",
+  BACKGROUND_COMPOSER_STATUS_ERROR: "failed",
+  BACKGROUND_COMPOSER_STATUS_EXPIRED: "failed",
+};
+
+const cursorUrl = (id) => `https://cursor.com/agents?id=${encodeURIComponent(id)}`;
+
+const cursor = {
+  id: "cursor",
+  label: "Cursor",
+  needsCheckout: false,
+  available: () => existsSync(join(HOME, ".config", "cursor", "auth.json")),
+
+  async start({ repo, task, branch, model, createPr, effort }) {
+    // Cursor validates the starting ref and rejects an empty string as a branch that does
+    // not exist, so say it plainly here rather than reading a 404 about a branch named "".
+    if (!branch) return { ok: false, error: "Cursor needs --branch to start from" };
+    const modelId = model ?? DEFAULT_MODELS.cursor;
+    const effortLevel = effort ?? DEFAULT_EFFORT;
+    const bcId = `bc-${randomUUID()}`;
+    const repoUrl = `https://github.com/${repo}`;
+    const result = await cursorCall(
+      "BackgroundComposerService",
+      "StartBackgroundComposerFromSnapshot",
+      {
+        bcId,
+        snapshotNameOrId: `github.com/${repo}`,
+        devcontainerStartingPoint: { url: repoUrl, ref: branch },
+        snapshotWorkspaceRootPath: "/workspace",
+        repoUrl,
+        baseBranch: branch,
+        returnImmediately: true,
+        autoBranch: true,
+        // Opening a pull request is a visible act on someone's repository.
+        autoCreatePr: createPr === true,
+        source: 8,
+        startingMessageType: 1,
+        addInitialMessageToResponses: true,
+        repositoryInfo: { pathEncryptionKey: "", shouldSyncIndex: false },
+        requestedModels: [
+          {
+            modelId,
+            maxMode: true,
+            parameters: [
+              { id: "effort", value: effortLevel },
+              { id: "speed", value: "fast" },
+            ],
+          },
+        ],
+        name: task.slice(0, 60),
+        conversationAction: {
+          userMessageAction: {
+            userMessage: { text: task, messageId: randomUUID() },
+            sendToInteractionListener: true,
+          },
+        },
+      },
+    );
+    if (!result.ok) return result;
+    const sessionId = result.body.bcId ?? bcId;
+    return { ok: true, sessionId, url: cursorUrl(sessionId), model: modelId, effort: effortLevel };
+  },
+
+  async status(sessionId) {
+    const result = await cursorCall("BackgroundComposerService", "GetBackgroundComposerInfo", {
+      bcId: sessionId,
+      includeDiff: false,
+      doNotThrowIfSetupNotFinished: true,
+    });
+    if (!result.ok) return result;
+    // The status really is nested twice.
+    const composer = result.body.composer?.composer ?? {};
+    const files = composer.filesChanged;
+    return {
+      ok: true,
+      status: {
+        sessionId,
+        url: composer.prUrl || cursorUrl(sessionId),
+        state: CURSOR_STATES[composer.status] ?? "idle",
+        detail: files !== undefined ? `${files} file${files === 1 ? "" : "s"} changed` : undefined,
+        repo: composer.repoUrl?.replace(/^https:\/\/github\.com\//, ""),
+        branch: composer.branchName || undefined,
+      },
+    };
+  },
+
+  async summary(sessionId) {
+    const result = await cursorCall(
+      "BackgroundComposerService",
+      "GetBackgroundComposerConversation",
+      { bcId: sessionId },
+    );
+    if (!result.ok) return undefined;
+    const turns = result.body.conversation ?? [];
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      if (turns[index]?.type === "MESSAGE_TYPE_AI" && turns[index].text) {
+        return turns[index].text.slice(0, MAX_SUMMARY);
+      }
+    }
+    return undefined;
+  },
+
+  async send(sessionId, message) {
+    const result = await cursorCall(
+      "BackgroundComposerService",
+      "AddAsyncFollowupBackgroundComposer",
+      { bcId: sessionId, text: message, synchronous: false },
+    );
+    return result.ok ? { ok: true, sessionId } : result;
+  },
+};
+
+// ---------------------------------------------------------------- codex
+
+const codexAuth = () => {
+  const tokens = readJson(join(HOME, ".codex", "auth.json"))?.tokens;
+  return tokens?.access_token && tokens?.account_id
+    ? { token: tokens.access_token, accountId: tokens.account_id }
+    : undefined;
+};
+
+/** Two base paths exist for the same surface; one intermittently 403s, so both are tried. */
+const CODEX_BASES = [
+  "https://chatgpt.com/backend-api/wham",
+  "https://chatgpt.com/backend-api/codex",
+];
+
+async function codexGet(path) {
+  const auth = codexAuth();
+  if (!auth) return { ok: false, error: "not signed in to Codex" };
+  let refusal = "Codex did not answer";
+  for (const base of CODEX_BASES) {
+    try {
+      const response = await fetch(`${base}${path}`, {
+        headers: {
+          authorization: `Bearer ${auth.token}`,
+          "chatgpt-account-id": auth.accountId,
+          accept: "application/json",
+          "content-type": "application/json",
+        },
+      });
+      if (response.ok) return { ok: true, body: await response.json() };
+      refusal = `Codex refused the call (${response.status})`;
+    } catch (error) {
+      refusal = error?.message ?? "could not reach Codex";
+    }
+  }
+  return { ok: false, error: refusal };
+}
+
+function codexState(status) {
+  const value = (status ?? "").toLowerCase();
+  if (!value) return "idle";
+  if (/error|fail|cancel/.test(value)) return "failed";
+  if (/pending|queue|run/.test(value)) return "working";
+  if (/complete|ready|done|success|applied/.test(value)) return "ready";
+  return "idle";
+}
+
+/**
+ * What the task actually said, as opposed to what it changed.
+ *
+ * The text lives on the turn — `turn.output_items[].content[].text` — and the task row only
+ * links to it by id. The content parts carry no `type`, so they are taken by having text
+ * rather than by being typed as text.
+ */
+async function codexTurnText(taskId) {
+  const task = await codexGet(`/tasks/${taskId}`);
+  if (!task.ok) return undefined;
+  const turnId = (task.body.task ?? task.body).current_turn_id;
+  if (!turnId) return undefined;
+  const turn = await codexGet(`/tasks/${taskId}/turns/${encodeURIComponent(turnId)}`);
+  if (!turn.ok) return undefined;
+  const said = [];
+  for (const item of turn.body.turn?.output_items ?? []) {
+    if (item?.type !== "message") continue;
+    for (const part of item.content ?? []) {
+      const text = String(part?.text ?? "").trim();
+      if (text) said.push(text);
+    }
+  }
+  // The last message is the answer; anything before it is working out loud.
+  return said.length ? said[said.length - 1].slice(0, MAX_SUMMARY) : undefined;
+}
+
+const codex = {
+  id: "codex",
+  label: "Codex",
+  needsCheckout: false,
+  available: () => existsSync(join(HOME, ".codex", "auth.json")),
+
+  async start({ repo, task, branch, attempts, model, effort }) {
+    if (!repo.includes("/")) return { ok: false, error: `${repo} is not an owner/repo name` };
+    const environments = await codexGet("/environments");
+    if (!environments.ok) return environments;
+    const rows = Array.isArray(environments.body)
+      ? environments.body
+      : (environments.body.environments ?? []);
+    const wanted = repo.trim().toLowerCase();
+    const match = rows.find((row) => String(row.label ?? "").trim().toLowerCase() === wanted);
+    if (!match) {
+      // No environment for this repository, and one cannot be made from an API. Say what to
+      // do rather than failing in a way that reads like a bug.
+      const others = rows
+        .map((row) => row.label)
+        .filter(Boolean)
+        .slice(0, 10);
+      return {
+        ok: false,
+        error: `Codex has no environment for ${repo}, and one cannot be created from here.${
+          others.length ? ` Environments that do exist: ${others.join(", ")}.` : ""
+        }`,
+        hint: "Create one at https://chatgpt.com/codex/settings/environments",
+      };
+    }
+    const modelId = model ?? DEFAULT_MODELS.codex;
+    const effortLevel = effort ?? DEFAULT_EFFORT;
+    // `cloud exec` has no --model or --effort flag; both are config overrides, which is how
+    // the CLI's own examples set them (-c model="o3").
+    const args = [
+      "cloud",
+      "exec",
+      "--env",
+      String(match.id),
+      "-c",
+      `model="${modelId}"`,
+      "-c",
+      `reasoning_effort="${effortLevel}"`,
+    ];
+    if (branch) args.push("--branch", branch);
+    if (attempts && attempts > 1) args.push("--attempts", String(attempts));
+    args.push(task);
+    const out = await run("codex", args, { timeoutMs: 120_000 });
+    const taskId = /task_e_[0-9a-f]{6,}/.exec(out)?.[0];
+    if (!taskId) return { ok: false, error: firstUsefulLine(out) || "no task id came back" };
+    return {
+      ok: true,
+      sessionId: taskId,
+      url: `https://chatgpt.com/codex/tasks/${taskId}`,
+      model: modelId,
+      effort: effortLevel,
+    };
+  },
+
+  async status(sessionId) {
+    const result = await codexGet(`/tasks/${sessionId}`);
+    if (!result.ok) return result;
+    const task = result.body.task ?? result.body;
+    const metadata = task.denormalized_metadata ?? {};
+    // The status is on the latest turn, not the task.
+    const turn = task.task_status_display?.latest_turn_status_display;
+    const diff = turn?.diff_stats ?? metadata.diff_stats ?? {};
+    const files = diff.files_modified;
+    return {
+      ok: true,
+      status: {
+        sessionId,
+        url: `https://chatgpt.com/codex/tasks/${sessionId}`,
+        state: codexState(turn?.turn_status ?? metadata.last_turn_status),
+        detail:
+          files !== undefined && files !== null
+            ? `${files} file${files === 1 ? "" : "s"} changed, +${diff.lines_added ?? 0}/-${diff.lines_removed ?? 0}`
+            : undefined,
+        branch: metadata.pushed_branch_name || metadata.start_branch_name || undefined,
+      },
+    };
+  },
+
+  async summary(sessionId) {
+    // A Codex task does write an answer, contrary to the obvious reading of its API: the
+    // prose is on the turn, not the task, so a summary built from the task alone reports
+    // only the diff — which says nothing at all when the work was to go and find something
+    // out. Both are worth having: what it said, then what it changed.
+    const [prose, result] = await Promise.all([
+      codexTurnText(sessionId),
+      codex.status(sessionId),
+    ]);
+    if (!result.ok) return prose;
+    const changed = [
+      result.status.detail ?? "no changes",
+      result.status.branch ? `on ${result.status.branch}` : undefined,
+      `Review at ${result.status.url}, or apply locally: codex cloud apply ${sessionId}`,
+    ]
+      .filter(Boolean)
+      .join(" — ");
+    return prose ? `${prose}\n\n${changed}` : changed;
+  },
+
+  async send() {
+    return {
+      ok: false,
+      error:
+        "Codex tasks cannot be followed up from here. Open the task to reply, or start a new one.",
+    };
+  },
+};
+
+// ---------------------------------------------------------------- shared
+
+const PROVIDERS = { claude, cursor, codex };
+
+/** Cursor mints bc-…, Codex task_…, Claude session_/cse_ — so a follow-up needs no lookup. */
+function providerForSessionId(sessionId) {
+  if (sessionId.startsWith("bc-")) return cursor;
+  if (sessionId.startsWith("task_")) return codex;
+  if (/^(session|cse)_/.test(sessionId)) return claude;
+  return undefined;
+}
+
+const isOver = (state) => state === "ready" || state === "failed";
+const shellQuote = (value) => `'${value.replace(/'/g, `'"'"'`)}'`;
+
+function firstUsefulLine(output) {
+  const lines = stripAnsi(output)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines[lines.length - 1];
+}
+
+function run(command, args, { cwd, timeoutMs, stopWhen } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      resolve(output);
+    };
+    const timer = setTimeout(finish, timeoutMs ?? 120_000);
+    const read = (chunk) => {
+      output += chunk.toString();
+      if (stopWhen?.(output)) finish();
+    };
+    child.stdout.on("data", read);
+    child.stderr.on("data", read);
+    child.on("error", (error) => {
+      output += `\n${error.message}`;
+      finish();
+    });
+    child.on("close", finish);
+  });
+}
+
+// ---------------------------------------------------------------- commands
+
+function parseArgs(argv) {
+  const positional = [];
+  const flags = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (!token.startsWith("--")) {
+      positional.push(token);
+      continue;
+    }
+    const key = token.slice(2);
+    const next = argv[index + 1];
+    if (next === undefined || next.startsWith("--")) {
+      flags[key] = true;
+    } else {
+      flags[key] = next;
+      index += 1;
+    }
+  }
+  return { positional, flags };
+}
+
+function requireProvider(id) {
+  const provider = PROVIDERS[id];
+  if (!provider) {
+    fail(`no provider called ${id ?? "(none given)"}`, `Try: ${Object.keys(PROVIDERS).join(", ")}.`);
+  }
+  if (!provider.available()) {
+    const how = {
+      claude: "Run `claude` once and sign in to claude.ai.",
+      cursor: "Sign in with the Cursor app; it writes ~/.config/cursor/auth.json.",
+      codex: "Sign in with `codex`; it writes ~/.codex/auth.json.",
+    };
+    fail(`${provider.label} is not signed in on this machine`, how[provider.id]);
+  }
+  return provider;
+}
+
+async function dispatch(flags) {
+  const provider = requireProvider(String(flags.provider ?? "cursor"));
+  const task = flags.task ? String(flags.task) : "";
+  const repo = flags.repo ? String(flags.repo) : "";
+  if (!task) fail("--task is required");
+  if (!repo && !provider.needsCheckout) fail("--repo is required (owner/name)");
+  const cwd = provider.needsCheckout ? String(flags.cwd ?? process.cwd()) : undefined;
+  if (cwd && !existsSync(join(cwd, ".git"))) fail(`${cwd} is not a git repository`);
+
+  const started = await provider.start({
+    repo,
+    task,
+    cwd,
+    branch: flags.branch ? String(flags.branch) : undefined,
+    model: flags.model ? String(flags.model) : undefined,
+    effort: flags.effort ? String(flags.effort) : undefined,
+    createPr: flags["create-pr"] === true,
+    attempts: flags.attempts ? Number(flags.attempts) : undefined,
+  });
+  if (!started.ok) fail(started.error, started.hint);
+  return { ...started, provider: provider.id };
+}
+
+async function waitFor(sessionId, flags) {
+  const provider = providerForSessionId(sessionId);
+  if (!provider) {
+    fail(
+      `nothing owns the id ${sessionId}`,
+      "Cursor ids start bc-, Codex task_, Claude session_ or cse_.",
+    );
+  }
+  const timeoutMs = Number(flags.timeout ?? DEFAULT_TIMEOUT_MS);
+  const intervalMs = Number(flags.interval ?? CHECK_EVERY_MS);
+  const deadline = Date.now() + timeoutMs;
+  let wait = Number(flags["first-check"] ?? FIRST_CHECK_MS);
+  let lastState;
+
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    wait = intervalMs;
+    const result = await provider.status(sessionId);
+    if (!result.ok) {
+      // A read that failed is not a finished agent; say so and keep waiting.
+      note(`could not read ${sessionId}: ${result.error}`);
+      if (Date.now() > deadline) fail(`gave up waiting for ${sessionId}: ${result.error}`);
+      continue;
+    }
+    const status = result.status;
+    if (status.state !== lastState) {
+      lastState = status.state;
+      note(`${sessionId} is ${status.state}${status.detail ? ` — ${status.detail}` : ""}`);
+    }
+    // needs_input is not the end: it usually gets an answer and carries on. Stopping there
+    // is opt-in, because for an unattended run it is the one state waiting cannot fix.
+    const stop =
+      isOver(status.state) ||
+      (status.state === "needs_input" && flags["stop-on-question"] === true);
+    if (stop) {
+      const summary = await provider.summary(sessionId).catch(() => undefined);
+      return { status, summary };
+    }
+    if (Date.now() > deadline) {
+      fail(
+        `${sessionId} was still ${status.state} after ${Math.round(timeoutMs / 60_000)} minutes`,
+        status.url,
+      );
+    }
+  }
+}
+
+function report({ status, summary }, extra = {}) {
+  const done = status.state === "ready";
+  say({
+    ok: done,
+    state: status.state,
+    sessionId: status.sessionId,
+    url: status.url,
+    ...(status.branch ? { branch: status.branch } : {}),
+    ...(status.detail ? { detail: status.detail } : {}),
+    ...(summary ? { summary } : {}),
+    ...extra,
+  });
+  process.exit(done ? 0 : 1);
+}
+
+const USAGE = `cloud-agent-worker — dispatch a cloud agent and wait for it
+
+  providers                        which providers are signed in on this machine
+  run      --provider <id> --repo <owner/name> --task "..." [--branch b] [--model m]
+                                   dispatch, then block until it finishes
+  dispatch --provider <id> ...     start one and print its id, without waiting
+  wait     <sessionId>             block on one that is already running
+  status   <sessionId>             read it once
+  send     <sessionId> "message"   follow up on a running agent
+
+  --branch b          the ref to start from (Cursor requires it)
+  --model m           override the pinned default (claude opus, cursor grok-4.6,
+                      codex gpt-5.6-sol)
+  --effort level      reasoning effort; high everywhere by default
+                      (Claude also takes xhigh and max)
+  --create-pr         open a PR when done (never assumed)
+  --attempts n        Codex best-of-N
+  --cwd path          Claude only; the checkout to start from (default: here)
+  --timeout ms        give up waiting (default 2h)
+  --interval ms       how often to poll (default 30s)
+  --first-check ms    how long before the first poll (default 20s)
+  --stop-on-question  return when the agent asks something, rather than waiting on
+
+Exit: 0 finished, 1 failed or gave up waiting, 2 could not start.
+Stdout is one JSON object; progress goes to stderr.`;
+
+async function main() {
+  const { positional, flags } = parseArgs(process.argv.slice(2));
+  const command = positional[0];
+  if (!command || flags.help) {
+    note(USAGE);
+    process.exit(command ? 0 : 1);
+  }
+
+  if (command === "providers") {
+    say({
+      ok: true,
+      providers: Object.values(PROVIDERS).map((provider) => ({
+        id: provider.id,
+        label: provider.label,
+        signedIn: provider.available(),
+        needsCheckout: provider.needsCheckout,
+        defaultModel: DEFAULT_MODELS[provider.id],
+        defaultEffort: DEFAULT_EFFORT,
+      })),
+    });
+    return;
+  }
+
+  if (command === "dispatch") {
+    const started = await dispatch(flags);
+    say({ ...started, note: "Not waited for. Use `wait` with this sessionId." });
+    return;
+  }
+
+  if (command === "run") {
+    const started = await dispatch(flags);
+    note(`started ${started.sessionId} — ${started.url}`);
+    report(await waitFor(started.sessionId, flags), { provider: started.provider });
+  }
+
+  if (command === "wait") {
+    if (!positional[1]) fail("a sessionId is required");
+    report(await waitFor(positional[1], flags));
+  }
+
+  if (command === "status") {
+    const sessionId = positional[1];
+    if (!sessionId) fail("a sessionId is required");
+    const provider = providerForSessionId(sessionId);
+    if (!provider) fail(`nothing owns the id ${sessionId}`);
+    const result = await provider.status(sessionId);
+    if (!result.ok) fail(result.error);
+    say({ ok: true, ...result.status });
+    return;
+  }
+
+  if (command === "send") {
+    const sessionId = positional[1];
+    const message = positional.slice(2).join(" ");
+    if (!sessionId || !message) fail("usage: send <sessionId> <message>");
+    const provider = providerForSessionId(sessionId);
+    if (!provider) fail(`nothing owns the id ${sessionId}`);
+    const sent = await provider.send(sessionId, message);
+    if (!sent.ok) fail(sent.error);
+    say({ ok: true, sessionId, note: "Queued. Use `wait` to follow it." });
+    return;
+  }
+
+  fail(`unknown command ${command}`, USAGE);
+}
+
+main().catch((error) => fail(error?.message ?? String(error)));
