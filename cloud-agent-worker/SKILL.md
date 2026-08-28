@@ -25,7 +25,7 @@ Everything prints **one JSON object on stdout**; progress goes to stderr. Exit c
 
 ```bash
 bin/cloud-agent-worker run \
-  --provider cursor --repo adam91holt/rakazo-private --branch ours \
+  --provider cursor --repo owner/name --branch main \
   --task "Add a --json flag to the doctor command and a test for it"
 ```
 
